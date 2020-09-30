@@ -326,13 +326,10 @@ def plot_mi(dir_, type_, type2_=None):
     y = np.zeros(x.shape[0])
     y[mi_nat.shape[0]:] = 1
 
-    # fpr, tpr, thresholds = metrics.roc_curve(y, x)
-    # auc = metrics.auc(fpr, tpr)
     ap = metrics.average_precision_score(y, x)
 
     # Plot formatting
     plt.legend()#(prop={'size': 20})
-    # plt.title('')
     plt.xlabel('Mutual information')#, fontsize=20)
     plt.ylabel('Density')#, fontsize=20)
     plt.tight_layout()
@@ -342,7 +339,6 @@ def plot_mi(dir_, type_, type2_=None):
 def plot_ens(dir_, rets, baseline_acc):
     lw = 1.25
     color = ['red', 'green', 'darkorange', 'b']
-    # rets = np.load(os.path.join(dir_, 'ens_rets.npy'))
     if isinstance(rets, list):
         rets = np.stack([np.array(item) for item in rets])
     min_acc = min(rets[:, 2].min(), rets[:, 6].min(), baseline_acc) - 0.1
@@ -359,12 +355,6 @@ def plot_ens(dir_, rets, baseline_acc):
     ax1.set_xlim((1, rets.shape[0]))
     ax1.set_xlabel('The number of MC sample')
     ax1.set_ylabel('Test accuracy (%)')
-    # ax2 = ax1.twinx()
-    # l3 = ax2.plot(rets[:, 0]+1, rets[:, 4], color=color[2], lw=lw, alpha=0.6)
-    # l4 = ax2.plot(rets[:, 0]+1, rets[:, 8], color=color[3], lw=lw)
-    # ax2.set_ylabel('ECE')
-    # ax2.set_ylim((0.0, max_mi))
-    # ax2.set_yticks(np.arange(0.0, max_mi+1e-6, max_mi/4.))
     ax1.legend(l1+l2+l3, ['Individual', 'Ensemble', 'Deterministic'], loc = 'best', fancybox=True, columnspacing=0.5, handletextpad=0.2, borderpad=0.15) # +l3+l4 , 'Indiv ECE', 'Ensemble ECE'  , fontsize=11
     plt.savefig(os.path.join(dir_, 'ens_plot.pdf'), format='pdf', dpi=600, bbox_inches='tight')
 
@@ -414,7 +404,6 @@ class CIFARR:
             transforms.Compose([
                 GeneratedDataAugment(args),
                 transforms.RandomCrop(32, padding=4),
-                # RandAugment(args.aug_n, args.aug_m),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
             ]))
@@ -610,8 +599,6 @@ def load_dataset_in_ft(args):
     fake_dataset = dset.ImageFolder(
         "gan_samples/imagenet/val",
         transforms.Compose([
-            # transforms.Resize(256),
-            # transforms.CenterCrop(224),
             transforms.ToTensor(),
             normalize,
         ]))
@@ -620,23 +607,9 @@ def load_dataset_in_ft(args):
         fake_dataset, batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True, sampler=fake_sampler)
 
-    # adv_dataset = CustomImageFolder(
-    #     'adv_samples/imagenet', 'adv_samples/imagenet/dev_dataset.csv',
-    #     'adv_samples/imagenet/imagenet_class_index.json', '/data/LargeData/Large/ImageNet/train',
-    #     transforms.Compose([
-    #         transforms.Resize(256),
-    #         # transforms.CenterCrop(224),
-    #         transforms.ToTensor(),
-    #         normalize,
-    #     ]))
-
-
-    # on gpu20: sshfs -p 4707 zhijie@101.6.240.88://home/yinpeng/exp-gs/results/intermediate_results/attacks_output adv_samples/
     adv_dataset = dset.ImageFolder(
         "adv_samples/fgsm_resnet_152",
         transforms.Compose([
-            # transforms.Resize(256),
-            # transforms.CenterCrop(224),
             transforms.ToTensor(),
             normalize,
         ]))
@@ -646,27 +619,6 @@ def load_dataset_in_ft(args):
         num_workers=args.workers, pin_memory=True, sampler=adv_sampler)
 
     return train_loader, train_loader1, val_loader, val_loader1, fake_loader, adv_loader
-
-# class CustomImageFolder(dset.ImageFolder):
-#     def __init__(self, root, csv_file, trans_file, in_root, transform=None, target_transform=None):
-#         super(CustomImageFolder, self).__init__(root, transform, target_transform)
-#         labels = pd.read_csv(csv_file)
-#         with open(trans_file, 'r') as f:
-#             map_trans = json.load(f)
-#         classes = [d.name for d in os.scandir(in_root) if d.is_dir()]
-#         classes.sort()
-#         class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
-#         self.labels = {k:class_to_idx[map_trans[str(int(v)-1)][0]] for k, v in zip(labels['ImageId'].tolist(), labels['TrueLabel'].tolist())}
-#
-#     def __getitem__(self, index):
-#         path, _ = self.samples[index]
-#         target = int(self.labels[path.split('/')[-1].replace('.png', '')])
-#         sample = self.loader(path)
-#         if self.transform is not None:
-#             sample = self.transform(sample)
-#         if self.target_transform is not None:
-#             target = self.target_transform(target)
-#         return sample, target
 
 def fast_collate(batch, memory_format=None):
 
@@ -691,10 +643,6 @@ class data_prefetcher():
         self.stream = torch.cuda.Stream(device=self.device)
         self.mean = torch.tensor([0.485 * 255, 0.456 * 255, 0.406 * 255]).cuda().view(1,3,1,1)
         self.std = torch.tensor([0.229 * 255, 0.224 * 255, 0.225 * 255]).cuda().view(1,3,1,1)
-        # With Amp, it isn't necessary to manually convert data to half.
-        # if args.fp16:
-        #     self.mean = self.mean.half()
-        #     self.std = self.std.half()
         self.preload()
 
     def preload(self):
@@ -704,27 +652,9 @@ class data_prefetcher():
             self.next_input = None
             self.next_target = None
             return
-        # if record_stream() doesn't work, another option is to make sure device inputs are created
-        # on the main stream.
-        # self.next_input_gpu = torch.empty_like(self.next_input, device='cuda')
-        # self.next_target_gpu = torch.empty_like(self.next_target, device='cuda')
-        # Need to make sure the memory allocated for next_* is not still in use by the main stream
-        # at the time we start copying to next_*:
-        # self.stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(self.stream):
             self.next_input = self.next_input.cuda(non_blocking=True)
             self.next_target = self.next_target.cuda(non_blocking=True)
-            # more code for the alternative if record_stream() doesn't work:
-            # copy_ will record the use of the pinned source tensor in this side stream.
-            # self.next_input_gpu.copy_(self.next_input, non_blocking=True)
-            # self.next_target_gpu.copy_(self.next_target, non_blocking=True)
-            # self.next_input = self.next_input_gpu
-            # self.next_target = self.next_target_gpu
-
-            # With Amp, it isn't necessary to manually convert data to half.
-            # if args.fp16:
-            #     self.next_input = self.next_input.half()
-            # else:
             self.next_input = self.next_input.float()
             self.next_input = self.next_input.sub_(self.mean).div_(self.std)
 
@@ -738,46 +668,6 @@ class data_prefetcher():
             target.record_stream(torch.cuda.current_stream(device=self.device))
         self.preload()
         return input, target
-#
-#
-# def load_dataset_in_fast(args):
-#     traindir = os.path.join(args.data_path, 'train')
-#     valdir = os.path.join(args.data_path, 'val')
-#     # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-#     #                                  std=[0.229, 0.224, 0.225])
-#     train_dataset = dset.ImageFolder(
-#         traindir,
-#         transforms.Compose([
-#             transforms.RandomResizedCrop(224),
-#             transforms.RandomHorizontalFlip(),
-#             # transforms.ToTensor(),
-#             # normalize,
-#         ]))
-#
-#     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if args.distributed else None
-#
-#     train_loader = torch.utils.data.DataLoader(
-#         train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-#         num_workers=args.workers, pin_memory=True, sampler=train_sampler, collate_fn=fast_collate)
-#
-#     val_dataset = dset.ImageFolder(
-#         valdir,
-#         transforms.Compose([
-#             transforms.Resize(256),
-#             transforms.CenterCrop(224),
-#             # transforms.ToTensor(),
-#             # normalize,
-#         ]))
-#
-#     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset) if args.distributed else None
-#
-#     val_loader = torch.utils.data.DataLoader(
-#         val_dataset, batch_size=args.batch_size, shuffle=False,
-#         num_workers=args.workers, pin_memory=True, sampler=val_sampler, collate_fn=fast_collate)
-#
-#     return train_loader, val_loader
-#
-#
 
 #----------------------------------------------------face----------------------------------------------------#
 
@@ -952,7 +842,6 @@ def load_dataset_face_ft(args, INPUT_SIZE=[112, 112],
         "deepfake_samples/face/val_3",
         transforms.Compose([
             transforms.Resize(128),
-            # transforms.CenterCrop(112),
             transforms.ToTensor(),
             normalize,
         ]))
@@ -962,27 +851,3 @@ def load_dataset_face_ft(args, INPUT_SIZE=[112, 112],
 
     return train_loader, train_loader1, val_loaders, fake_loader
 
-
-if __name__ == "__main__":
-    # plot_mi('/data/zhijie/snapshots_ab/map-decay2/', 'advg') # g31
-    plot_mi('/data/zhijie/snapshots_ab/ft-gan1000-.75/', 'advg') # g31
-    # plot_mi('/data/zhijie/snapshots_ab_in/map-pretrained/', 'fake') # g31
-    # print(plot_mi('/data/zhijie/snapshots_ab_in/ft-gan-.75-1-alpha3', 'fake')) # g30
-    #
-    #
-    # plot_mi('/data/zhijie/snapshots_ab_in/ft-gan-.75-n1/', 'fake') # g30
-    plot_mi('/data/zhijie/snapshots_ab/ft-gan1000-n1/', 'advg') # g31
-
-    # base = '/data/zhijie/snapshots_ab_in'
-    # for dir_ in ['map-pretrained', 'map', 'bayes-init6_5-warmup']: #['ft-ood5']: #['map-decay2-dp0.3', 'ft-ood10']: #['map-decay2', 'bayes-init6_5-decay2-2']:
-    #     for type_ in ['advg', 'noise']: #['advg', 'svhn', 'celeba']:
-    #         mi_nat = np.load(os.path.join(base, dir_, 'mis.npy'))
-    #         mi_svhn = np.load(os.path.join(base, dir_, 'mis_{}.npy'.format(type_)))
-    #         x = np.concatenate((mi_nat, mi_svhn), 0)
-    #         y = np.zeros(x.shape[0])
-    #         y[mi_nat.shape[0]:] = 1
-    #
-    #         fpr, tpr, thresholds = metrics.roc_curve(y, x)
-    #         auc = metrics.auc(fpr, tpr)
-    #         ap = metrics.average_precision_score(y, x)
-    #         print('{} NAT vs. {}: AP {} AUC {}'.format(dir_, type_, ap, auc))

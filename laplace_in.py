@@ -1,4 +1,3 @@
-# CUDA_VISIBLE_DEVICES=1 python  laplace_in.py --gpu 0 --batch_size 64 --kfac_norm 128 --kfac_scale 1
 from __future__ import division
 import os, sys, shutil, time, random, math, copy
 
@@ -28,7 +27,7 @@ model_names = sorted(name for name in models.__dict__ if name.islower() and not 
 parser = argparse.ArgumentParser(description='Laplace for ImageNet', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 # Data / Model
-parser.add_argument('--data_path', metavar='DPATH', default='/data/LargeData/Large/ImageNet', type=str, help='Path to dataset')
+parser.add_argument('--data_path', metavar='DPATH', default='./data/ImageNet', type=str, help='Path to dataset')
 parser.add_argument('--arch', metavar='ARCH', default='resnet50', help='model architecture: ' + ' | '.join(model_names) + ' (default: resnet50)')
 
 # Optimization
@@ -152,8 +151,6 @@ def main_worker(gpu, ngpus_per_node, args):
     prefix_ = 'module.' if args.distributed else ''
     net_dict.update({prefix_ + k: v for k,v in torch.load('./ckpts/resnet50-19c8e357.pth', map_location='cuda:{}'.format(args.gpu)).items()})
     net.load_state_dict(net_dict)
-
-    # net.load_state_dict({k.replace('module.', '').replace("_mu", ""): v for k,v in torch.load('/data/zhijie/snapshots_ab_in/ft-gan-.75-1-alpha3/checkpoint.pth.tar', map_location='cuda:{}'.format(args.gpu))['state_dict'].items()  if not '_log_sigma' in k})
 
     cudnn.benchmark = True
 
@@ -436,8 +433,6 @@ def load_dataset_in_ft(args):
     fake_dataset = dset.ImageFolder(
         "gan_samples/imagenet/val",
         transforms.Compose([
-            # transforms.Resize(256),
-            # transforms.CenterCrop(224),
             transforms.ToTensor(),
             normalize,
         ]))
@@ -445,12 +440,9 @@ def load_dataset_in_ft(args):
         fake_dataset, batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
-    # on gpu20: sshfs -p 4707 zhijie@101.6.240.88://home/yinpeng/exp-gs/results/intermediate_results/attacks_output adv_samples/
     adv_dataset = dset.ImageFolder(
         "adv_samples/fgsm_resnet_152",
         transforms.Compose([
-            # transforms.Resize(256),
-            # transforms.CenterCrop(224),
             transforms.ToTensor(),
             normalize,
         ]))

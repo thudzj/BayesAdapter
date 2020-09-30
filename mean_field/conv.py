@@ -141,13 +141,6 @@ class BayesConv2dMF(_BayesConvNdMF):
                             groups=self.groups, padding=self.padding)
         else:
             if self.local_reparam:
-                # input_concat = torch.cat([input, input**2], 1)
-                # weight_concat = torch.cat([self.weight_mu, (self.weight_log_sigma*2).exp_()], 0)
-                # act_concat = F.conv2d(input_concat, weight=weight_concat, bias=None,
-                #                       stride=self.stride, padding=self.padding,
-                #                       dilation=self.dilation, groups=self.groups*2)
-                # act_mu, act_var = act_concat.chunk(2, dim=1)
-                # out = torch.randn_like(act_mu).mul_(act_var.sqrt_()).add_(act_mu)
                 act_mu = F.conv2d(input, weight=self.weight_mu, bias=None,
                                   stride=self.stride, padding=self.padding,
                                   dilation=self.dilation, groups=self.groups)
@@ -156,26 +149,14 @@ class BayesConv2dMF(_BayesConvNdMF):
                                   stride=self.stride, padding=self.padding,
                                   dilation=self.dilation, groups=self.groups)#.sqrt_()
                 act_std = torch.sqrt(act_var+1e-10)
-                # print(act_std.data.norm().item())
                 out =  torch.randn_like(act_mu).mul_(act_std).add_(act_mu)
             else:
                 bs = input.shape[0]
-                if False:
-                    eps1 = torch.randn(bs//4, *self.weight_size, device=input.device, dtype=input.dtype).repeat(2, 1, 1, 1, 1)
-                    eps2 = torch.randn(bs//4, *self.weight_size, device=input.device, dtype=input.dtype).repeat(2, 1, 1, 1, 1)
-                    weight = self.mul_exp_add(torch.cat([eps1, eps2]),
-                                        self.weight_log_sigma, self.weight_mu).view(
-                                        bs*self.weight_size[0], *self.weight_size[1:])
-                    out = F.conv2d(input.view(1, -1, input.shape[2], input.shape[3]), weight=weight, bias=None,
-                                    stride=self.stride, dilation=self.dilation,
-                                    groups=self.groups*bs, padding=self.padding)
-                    out = out.view(bs, self.out_channels, out.shape[2], out.shape[3])
-                else:
-                    weight = self.mul_exp_add(torch.randn(bs, *self.weight_size, device=input.device, dtype=input.dtype),
-                                        self.weight_log_sigma, self.weight_mu).view(
-                                        bs*self.weight_size[0], *self.weight_size[1:])
-                    out = F.conv2d(input.view(1, -1, input.shape[2], input.shape[3]), weight=weight, bias=None,
-                                    stride=self.stride, dilation=self.dilation,
-                                    groups=self.groups*bs, padding=self.padding)
-                    out = out.view(bs, self.out_channels, out.shape[2], out.shape[3])
+                weight = self.mul_exp_add(torch.randn(bs, *self.weight_size, device=input.device, dtype=input.dtype),
+                                    self.weight_log_sigma, self.weight_mu).view(
+                                    bs*self.weight_size[0], *self.weight_size[1:])
+                out = F.conv2d(input.view(1, -1, input.shape[2], input.shape[3]), weight=weight, bias=None,
+                                stride=self.stride, dilation=self.dilation,
+                                groups=self.groups*bs, padding=self.padding)
+                out = out.view(bs, self.out_channels, out.shape[2], out.shape[3])
         return out

@@ -21,7 +21,7 @@ model_names = sorted(name for name in models.__dict__ if name.islower() and not 
 parser = argparse.ArgumentParser(description='Training script for CIFAR', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 # Data / Model
-parser.add_argument('--data_path', metavar='DPATH', default='/data/zhijie/data', type=str, help='Path to dataset') #/data/LargeData/cifar/
+parser.add_argument('--data_path', metavar='DPATH', default='./data', type=str, help='Path to dataset')
 parser.add_argument('--dataset', metavar='DSET', default='cifar10', type=str, choices=['cifar10', 'cifar100', 'imagenet'], help='Choose between CIFAR/ImageNet.')
 parser.add_argument('--arch', metavar='ARCH', default='wrn', help='model architecture: ' + ' | '.join(model_names) + ' (default: wrn)')
 parser.add_argument('--depth', type=int, metavar='N', default=28)
@@ -41,7 +41,7 @@ parser.add_argument('--cutout', dest='cutout', action='store_true', help='Enable
 parser.add_argument('--dropout_rate', type=float, default=0.)
 
 # Checkpoints
-parser.add_argument('--save_path', type=str, default='/data/zhijie/snapshots_ab/', help='Folder to save checkpoints and log.')
+parser.add_argument('--save_path', type=str, default='./snapshots_ab/', help='Folder to save checkpoints and log.')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='Path to latest checkpoint (default: none)')
 parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='Manual epoch number (useful on restarts)')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate model on test set')
@@ -214,15 +214,7 @@ def main_worker(gpu, ngpus_per_node, args):
     train_loader, train_loader1, test_loader, test_loader1, fake_loader, fake_loader2 = load_dataset_ft(args)
 
     if args.evaluate:
-        # test with mutual information attack
-        # print_log('-----------------crafted adv samples-----------------', log)
-        # ens_attack(test_loader1, net, criterion, args, log, 3, True)
-        # if args.gpu == 0: print_log('NAT vs. ADV: AP {}'.format(plot_mi(args.save_path, 'advg')), log)
-        #
-        # ens_attack(test_loader1, net, criterion, args, log, 3)
-        # if args.gpu == 0: print_log('NAT vs. ADV: AP {}'.format(plot_mi(args.save_path, 'advg')), log)
-        while True:
-            evaluate(test_loader, test_loader1, fake_loader, fake_loader2, net, criterion, args, log, 20, 100)
+        evaluate(test_loader, test_loader1, fake_loader, fake_loader2, net, criterion, args, log, 20, 100)
         return
 
     start_time = time.time()
@@ -305,7 +297,7 @@ def train(train_loader, train_loader1, model, criterion, optimizer, var_optimize
         out1_0 = output[bs:bs+bs1].softmax(-1)
         out1_1 = output[bs+bs1:].softmax(-1)
         mi1 = ent((out1_0 + out1_1)/2.) - (ent(out1_0) + ent(out1_1))/2.
-        rank_loss = torch.nn.functional.relu(args.mi_th - mi1).mean() #rank_loss = torch.nn.functional.softplus(mi - mi1).mean()
+        rank_loss = torch.nn.functional.relu(args.mi_th - mi1).mean()
 
         prec1, prec5 = accuracy(output[:bs], target, topk=(1, 5))
         losses.update(loss.detach().item(), bs)
@@ -523,8 +515,8 @@ def save_checkpoint(state, is_best, save_path, filename):
         shutil.copyfile(filename, bestname)
 
 def adjust_learning_rate(optimizer, var_optimizer, epoch, args):
-    lr = args.learning_rate# * args.batch_size * args.world_size / 128
-    slr = args.log_sigma_lr# * args.batch_size * args.world_size / 128
+    lr = args.learning_rate
+    slr = args.log_sigma_lr
     assert len(args.gammas) == len(args.schedule), "length of gammas and schedule should be equal"
     for (gamma, step) in zip(args.gammas, args.schedule):
         if (epoch >= step): slr = slr * gamma

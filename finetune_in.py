@@ -21,7 +21,7 @@ model_names = sorted(name for name in models.__dict__ if name.islower() and not 
 parser = argparse.ArgumentParser(description='Training script for ImageNet', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 # Data / Model
-parser.add_argument('--data_path', metavar='DPATH', default='/data/LargeData/Large/ImageNet', type=str, help='Path to dataset')
+parser.add_argument('--data_path', metavar='DPATH', default='./data/ImageNet', type=str, help='Path to dataset')
 parser.add_argument('--arch', metavar='ARCH', default='resnet50', help='model architecture: ' + ' | '.join(model_names) + ' (default: resnet50)')
 
 # Optimization
@@ -37,7 +37,7 @@ parser.add_argument('--decay', type=float, default=1e-4, help='Weight decay (L2 
 parser.add_argument('--dropout_rate', type=float, default=0.)
 
 # Checkpoints
-parser.add_argument('--save_path', type=str, default='/data/zhijie/snapshots_ab_in/', help='Folder to save checkpoints and log.')
+parser.add_argument('--save_path', type=str, default='./snapshots_ab_in/', help='Folder to save checkpoints and log.')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='Path to latest checkpoint (default: none)')
 parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='Manual epoch number (useful on restarts)')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate model on test set')
@@ -209,34 +209,8 @@ def main_worker(gpu, ngpus_per_node, args):
     var_optimizer.num_data = len(train_loader.dataset)
 
     if args.evaluate:
-        net.apply(unfreeze)
-        # rets = ens_validate(test_loader, net, criterion, args, log, True, 100, suffix='_tmp')
-        # print_log('TOP1 average: {:.4f}, ensemble: {:.4f}'.format(rets[:,2].mean(), rets[-1][-3]), log)
-        # print_log('TOP5 average: {:.4f}, ensemble: {:.4f}'.format(rets[:,3].mean(), rets[-1][-2]), log)
-        # print_log('LOS  average: {:.4f}, ensemble: {:.4f}'.format(rets[:,1].mean(), rets[-1][-4]), log)
-        # print_log('ECE  ensemble: {:.4f}'.format(rets[-1][-1]), log)
-        # if args.gpu == 0: plot_ens(args.save_path, rets, deter_rets[0][2])
-
-        # while True:
-        #     ens_validate(fake_loader, net, criterion, args, log, True, 20, suffix='_fake')
-        #     if args.gpu == 0: print_log('NAT vs. Fake: AP {}'.format(plot_mi(args.save_path, 'fake')), log)
-        #
-        #     ens_validate(adv_loader, net, criterion, args, log, True, 20, suffix='_adv')
-        #     if args.gpu == 0: print_log('NAT vs. ADV-dyp: AP {}'.format(plot_mi(args.save_path, 'adv')), log)
-        while True:
-            evaluate(test_loader, test_loader1, fake_loader, adv_loader, net, criterion, args, log, 20, 100)
+        evaluate(test_loader, test_loader1, fake_loader, adv_loader, net, criterion, args, log, 20, 100)
         return
-
-    # net.apply(freeze)
-    # deter_rets = ens_validate(test_loader, net, criterion, args, log, False, 1)
-    # if args.gpu == 0:
-    #     print(deter_rets)
-    # net.apply(unfreeze)
-    # deter_rets = ens_validate(fake_loader, adv_loader, net, criterion, args, log, True, 1)
-    # if args.gpu == 0:
-    #     print(deter_rets)
-    # if args.gpu == 0: print_log('NAT vs. ADV: AP {}'.format(plot_mi(args.save_path, 'advg')), log)
-    # evaluate(test_loader, test_loader1, fake_loader, adv_loader, net, criterion, args, log, 2)
 
     start_time = time.time()
     epoch_time = AverageMeter()
@@ -281,9 +255,7 @@ def main_worker(gpu, ngpus_per_node, args):
         start_time = time.time()
         recorder.plot_curve(os.path.join(args.save_path, 'log.png'))
 
-    while True:
-        evaluate(test_loader, test_loader1, fake_loader, adv_loader, net, criterion, args, log, 20, 100)
-
+    evaluate(test_loader, test_loader1, fake_loader, adv_loader, net, criterion, args, log, 20, 100)
     log[0].close()
 
 def train(train_loader, train_loader1, model, criterion, optimizer, var_optimizer, epoch, args, log):
@@ -309,9 +281,6 @@ def train(train_loader, train_loader1, model, criterion, optimizer, var_optimize
         input1 = next(train_loader1_iter)
         input1 = input1.cuda(args.gpu, non_blocking=True)
 
-        # if epoch < 5:
-        #     warmup_learning_rate(optimizer, var_optimizer, epoch, i, len(train_loader), args)
-
         bs = input.shape[0]
         bs1 = input1.shape[0]
 
@@ -321,7 +290,7 @@ def train(train_loader, train_loader1, model, criterion, optimizer, var_optimize
         out1_0 = output[bs:bs+bs1].softmax(-1)
         out1_1 = output[bs+bs1:].softmax(-1)
         mi1 = ent((out1_0 + out1_1)/2.) - (ent(out1_0) + ent(out1_1))/2.
-        rank_loss = torch.nn.functional.relu(args.mi_th - mi1).mean() #rank_loss = torch.nn.functional.softplus(mi - mi1).mean()
+        rank_loss = torch.nn.functional.relu(args.mi_th - mi1).mean()
 
         prec1, prec5 = accuracy(output[:bs], target, topk=(1, 5))
         losses.update(loss.detach().item(), bs)
@@ -534,8 +503,8 @@ def save_checkpoint(state, is_best, save_path, filename):
         shutil.copyfile(filename, bestname)
 
 def adjust_learning_rate(optimizer, var_optimizer, epoch, args):
-    lr = args.learning_rate# * args.batch_size * args.world_size / 256
-    slr = args.log_sigma_lr# * args.batch_size * args.world_size / 256
+    lr = args.learning_rate
+    slr = args.log_sigma_lr
     assert len(args.gammas) == len(args.schedule), "length of gammas and schedule should be equal"
     for (gamma, step) in zip(args.gammas, args.schedule):
         if (epoch >= step): slr = slr * gamma
@@ -544,12 +513,6 @@ def adjust_learning_rate(optimizer, var_optimizer, epoch, args):
     for param_group in optimizer.param_groups: param_group['lr'] = lr
     for param_group in var_optimizer.param_groups: param_group['lr'] = slr
     return lr, slr
-
-# def warmup_learning_rate(optimizer, var_optimizer, epoch, step, len_epoch, args):
-#     lr = args.learning_rate * args.batch_size * args.world_size / 256 * float(step + epoch*len_epoch)/(5.*len_epoch)
-#     slr = args.log_sigma_lr * args.batch_size * args.world_size / 256 * float(step + epoch*len_epoch)/(5.*len_epoch)
-#     for param_group in optimizer.param_groups: param_group['lr'] = lr
-#     for param_group in var_optimizer.param_groups: param_group['lr'] = slr
 
 def accuracy(output, target, topk=(1,)):
     if len(target.shape) > 1: return torch.tensor(1), torch.tensor(1)

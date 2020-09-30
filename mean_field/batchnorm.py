@@ -104,21 +104,10 @@ class _BayesBatchNormMF(Module):
                 weight = weight.unsqueeze(0)
                 bias = bias.unsqueeze(0)
             else:
-                if False:
-                    eps1 = torch.randn(input.shape[0]//4, self.num_features, device=input.device, dtype=input.dtype).repeat(2, 1)
-                    eps2 = torch.randn(input.shape[0]//4, self.num_features, device=input.device, dtype=input.dtype).repeat(2, 1)
-
-                    eps1_b = torch.randn(input.shape[0]//4, self.num_features, device=input.device, dtype=input.dtype).repeat(2, 1)
-                    eps2_b = torch.randn(input.shape[0]//4, self.num_features, device=input.device, dtype=input.dtype).repeat(2, 1)
-                    weight = self.weight_mu + torch.exp(self.weight_log_sigma) * \
-                            torch.cat([eps1, eps2])
-                    bias = self.bias_mu + torch.exp(self.bias_log_sigma) * \
-                            torch.cat([eps1_b, eps2_b])
-                else:
-                    weight = self.weight_mu + torch.exp(self.weight_log_sigma) * \
-                            torch.randn(input.shape[0], self.num_features, device=input.device, dtype=input.dtype)
-                    bias = self.bias_mu + torch.exp(self.bias_log_sigma) * \
-                            torch.randn(input.shape[0], self.num_features, device=input.device, dtype=input.dtype)
+                weight = self.weight_mu + torch.exp(self.weight_log_sigma) * \
+                        torch.randn(input.shape[0], self.num_features, device=input.device, dtype=input.dtype)
+                bias = self.bias_mu + torch.exp(self.bias_log_sigma) * \
+                        torch.randn(input.shape[0], self.num_features, device=input.device, dtype=input.dtype)
             if out.dim() == 4:
                 out = torch.addcmul(bias[:, :, None, None], weight[:, :, None, None], out)
             elif out.dim() == 2:

@@ -22,7 +22,7 @@ model_names = sorted(name for name in models.__dict__ if name.islower() and not 
 parser = argparse.ArgumentParser(description='Training script for ImageNet', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 # Data / Model
-parser.add_argument('--data_path', metavar='DPATH', default='/data/LargeData/ImageNet', type=str, help='Path to dataset')
+parser.add_argument('--data_path', metavar='DPATH', default='./data/ImageNet', type=str, help='Path to dataset')
 parser.add_argument('--arch', metavar='ARCH', default='resnet50', help='model architecture: ' + ' | '.join(model_names) + ' (default: resnet50)')
 
 # Optimization
@@ -36,7 +36,7 @@ parser.add_argument('--decay', type=float, default=1e-4, help='Weight decay (L2 
 parser.add_argument('--dropout_rate', type=float, default=0.)
 
 # Checkpoints
-parser.add_argument('--save_path', type=str, default='/data/zhijie/snapshots_ab_in/', help='Folder to save checkpoints and log.')
+parser.add_argument('--save_path', type=str, default='./snapshots_ab_in/', help='Folder to save checkpoints and log.')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='Path to latest checkpoint (default: none)')
 parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='Manual epoch number (useful on restarts)')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate model on test set')

@@ -23,7 +23,7 @@ model_names = sorted(name for name in models.__dict__ if name.islower() and not 
 parser = argparse.ArgumentParser(description='Training script for face recognition', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 # Data / Model
-parser.add_argument('--data_path', metavar='DPATH', default='/data/xiaoyang/data/faces_emore/', type=str, help='Path to dataset')
+parser.add_argument('--data_path', metavar='DPATH', default='./data/faces_emore/', type=str, help='Path to dataset')
 parser.add_argument('--arch', metavar='ARCH', default='mobilenet_v2', help='model architecture: ' + ' | '.join(model_names) + ' (default: mobilenet_v2)')
 
 # Optimization
@@ -40,7 +40,7 @@ parser.add_argument('--decay', type=float, default=1e-4, help='Weight decay (L2 
 parser.add_argument('--dropout_rate', type=float, default=0.) #0.2 for mc dropout
 
 # Checkpoints
-parser.add_argument('--save_path', type=str, default='/data/zhijie/snapshots_ab_face/', help='Folder to save checkpoints and log.')
+parser.add_argument('--save_path', type=str, default='./snapshots_ab_face/', help='Folder to save checkpoints and log.')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='Path to latest checkpoint (default: none)')
 parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='Manual epoch number (useful on restarts)')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate model on test set')
@@ -237,8 +237,7 @@ def main_worker(gpu, ngpus_per_node, args):
         start_time = time.time()
         recorder.plot_curve(os.path.join(args.save_path, 'log.png'))
 
-    while True:
-        validate(test_loaders, net, criterion, args, log)
+    validate(test_loaders, net, criterion, args, log)
 
     log[0].close()
 

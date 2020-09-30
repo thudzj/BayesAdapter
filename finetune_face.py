@@ -23,7 +23,7 @@ model_names = sorted(name for name in models.__dict__ if name.islower() and not 
 parser = argparse.ArgumentParser(description='Training script for face recognition', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 # Data / Model
-parser.add_argument('--data_path', metavar='DPATH', default='/data/xiaoyang/data/faces_emore/', type=str, help='Path to dataset')
+parser.add_argument('--data_path', metavar='DPATH', default='./data/faces_emore/', type=str, help='Path to dataset')
 parser.add_argument('--arch', metavar='ARCH', default='mobilenet_v2', help='model architecture: ' + ' | '.join(model_names) + ' (default: mobilenet_v2)')
 
 # Optimization
@@ -39,7 +39,7 @@ parser.add_argument('--decay', type=float, default=1e-4, help='Weight decay (L2 
 parser.add_argument('--dropout_rate', type=float, default=0.)
 
 # Checkpoints
-parser.add_argument('--save_path', type=str, default='/data/zhijie/snapshots_ab_face/', help='Folder to save checkpoints and log.')
+parser.add_argument('--save_path', type=str, default='./snapshots_ab_face/', help='Folder to save checkpoints and log.')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='Path to latest checkpoint (default: none)')
 parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='Manual epoch number (useful on restarts)')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate model on test set')
@@ -219,8 +219,7 @@ def main_worker(gpu, ngpus_per_node, args):
     var_optimizer.num_data = len(train_loader.dataset)
 
     if args.evaluate:
-        while True:
-            evaluate(test_loaders, fake_loader, net, criterion, args, log, 20, 20)
+        evaluate(test_loaders, fake_loader, net, criterion, args, log, 20, 20)
         return
 
     start_time = time.time()
@@ -241,7 +240,6 @@ def main_worker(gpu, ngpus_per_node, args):
                     + ' [Best : Accuracy={:.2f}, Error={:.2f}]'.format(recorder.max_accuracy(False), 100-recorder.max_accuracy(False)), log)
 
         train_acc, train_los = train(train_loader, train_loader1, net, criterion, optimizer, var_optimizer, epoch, args, log)
-        # if epoch == 0:#args.epochs//2 - 1:
         evaluate(test_loaders, fake_loader, net, criterion, args, log, 2)
         recorder.update(epoch, train_los, train_acc, 0, 0)
 
@@ -259,8 +257,7 @@ def main_worker(gpu, ngpus_per_node, args):
         start_time = time.time()
         recorder.plot_curve(os.path.join(args.save_path, 'log.png'))
 
-    while True:
-        evaluate(test_loaders, fake_loader, net, criterion, args, log, 20, 20)
+    evaluate(test_loaders, fake_loader, net, criterion, args, log, 20, 20)
 
     log[0].close()
 
@@ -296,7 +293,7 @@ def train(train_loader, train_loader1, model, criterion, optimizer, var_optimize
         out1_0 = output[bs:bs+bs1].softmax(-1)
         out1_1 = output[bs+bs1:].softmax(-1)
         mi1 = ent((out1_0 + out1_1)/2.) - (ent(out1_0) + ent(out1_1))/2.
-        rank_loss = torch.nn.functional.relu(args.mi_th - mi1).mean() #rank_loss = torch.nn.functional.softplus(mi - mi1).mean()
+        rank_loss = torch.nn.functional.relu(args.mi_th - mi1).mean()
 
         prec1, prec5 = accuracy(output[:bs], target, topk=(1, 5))
         losses.update(loss.detach().item(), bs)
@@ -453,9 +450,6 @@ def ens_attack(val_loaders, model, criterion, args, log, num_ens=20, num_ens_a=8
                 embeddings.append(embedding)
 
             mis = torch.cat(mis, 0)
-            # embeddings = torch.cat(embeddings, 0).data.cpu().numpy()
-            # tpr, fpr, accuracy, best_thresholds = verify(embeddings, np.ones(len(embeddings)).astype(bool), 10)
-            # print_log('  **Test** {}: {:.3f}'.format(name, accuracy.mean()), log, True)
 
     torch.distributed.barrier()
     if args.gpu < len(val_loaders): np.save(os.path.join(args.save_path, 'mis_adv_{}.npy'.format(name)), mis.data.cpu().numpy())

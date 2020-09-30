@@ -1,4 +1,3 @@
-# script: CUDA_VISIBLE_DEVICES=5 python  kfac.py --gpu 0 --batch_size 128 --kfac_norm 100 --kfac_scale 50000000000
 from __future__ import division
 import os, sys, shutil, time, random, math, copy
 
@@ -28,7 +27,7 @@ model_names = sorted(name for name in models.__dict__ if name.islower() and not 
 parser = argparse.ArgumentParser(description='Training script for CIFAR', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 # Data / Model
-parser.add_argument('--data_path', metavar='DPATH', default='/data/zhijie/data', type=str, help='Path to dataset') #/data/LargeData/cifar/
+parser.add_argument('--data_path', metavar='DPATH', default='./data', type=str, help='Path to dataset')
 parser.add_argument('--dataset', metavar='DSET', default='cifar10', type=str, choices=['cifar10', 'cifar100', 'imagenet'], help='Choose between CIFAR/ImageNet.')
 parser.add_argument('--arch', metavar='ARCH', default='wrn', help='model architecture: ' + ' | '.join(model_names) + ' (default: wrn)')
 parser.add_argument('--depth', type=int, metavar='N', default=28)

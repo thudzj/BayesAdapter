@@ -70,23 +70,11 @@ class BayesLinearMF(Module):
                 act_std = torch.sqrt(act_var+1e-16)
                 out = act_mu + act_std * torch.randn_like(act_mu)
             else:
-                if False:
-                    eps1 = torch.randn(input.shape[0]//4, self.out_features, self.in_features, device=input.device, dtype=input.dtype).repeat(2, 1, 1)
-                    eps2 = torch.randn(input.shape[0]//4, self.out_features, self.in_features, device=input.device, dtype=input.dtype).repeat(2, 1, 1)
-
-                    weight = self.weight_mu + torch.exp(self.weight_log_sigma) * torch.cat([eps1, eps2])
-                    out = torch.bmm(weight, input.unsqueeze(2)).squeeze()
-                    if self.bias:
-                        eps1_b = torch.randn(input.shape[0]//4, self.out_features, device=input.device, dtype=input.dtype).repeat(2, 1)
-                        eps2_b = torch.randn(input.shape[0]//4, self.out_features, device=input.device, dtype=input.dtype).repeat(2, 1)
-                        bias = self.bias_mu + torch.exp(self.bias_log_sigma) * torch.cat([eps1_b, eps2_b])
-                        out = out + bias
-                else:
-                    weight = self.weight_mu + torch.exp(self.weight_log_sigma) * torch.randn(input.shape[0], self.out_features, self.in_features, device=input.device, dtype=input.dtype)
-                    out = torch.bmm(weight, input.unsqueeze(2)).squeeze()
-                    if self.bias:
-                        bias = self.bias_mu + torch.exp(self.bias_log_sigma) * torch.randn(input.shape[0], self.out_features, device=input.device, dtype=input.dtype)
-                        out = out + bias
+                weight = self.weight_mu + torch.exp(self.weight_log_sigma) * torch.randn(input.shape[0], self.out_features, self.in_features, device=input.device, dtype=input.dtype)
+                out = torch.bmm(weight, input.unsqueeze(2)).squeeze()
+                if self.bias:
+                    bias = self.bias_mu + torch.exp(self.bias_log_sigma) * torch.randn(input.shape[0], self.out_features, device=input.device, dtype=input.dtype)
+                    out = out + bias
         return out
 
     def extra_repr(self):
