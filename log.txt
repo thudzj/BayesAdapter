@@ -1,0 +1,532 @@
+'''
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-single_eps-init6_5 --bayes mf --batch_size 256 --single_eps --log_sigma_init_range -6 -5  (gpu19)
+    **Freezed test**  Prec@1 96.810 Prec@5 99.970 Error@1 3.190 Loss 0.12933
+    **Unfreezed test**  Prec@1 95.280 Prec@5 99.810 Error@1 4.720 Loss 0.17137
+    ACC ensemble: 96.640
+    ECE average: 0.0237, ensemble: 0.0149
+    AUC: 0.9675810732944069
+
+
+    CUDA_VISIBLE_DEVICES=4,5,6,7 python main.py --cutout --job-id bayes-4g-init6_5 --bayes mf --batch_size 128 --log_sigma_init_range -6 -5
+    **Freezed test**  Prec@1 96.790 Prec@5 99.960 Error@1 3.210 Loss 0.12789
+    **Unfreezed test**  Prec@1 95.960 Prec@5 99.920 Error@1 4.040 Loss 0.14045
+    ACC ensemble: 96.770
+    ECE average: 0.0202, ensemble: 0.0030
+    AUC: 0.9765952481561153
+
+
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-init6_5 --bayes mf --batch_size 256 --log_sigma_init_range -6 -5
+    **Freezed test**  Prec@1 96.800 Prec@5 99.960 Error@1 3.200 Loss 0.12826
+    **Unfreezed test**  Prec@1 96.270 Prec@5 99.940 Error@1 3.730 Loss 0.13490
+    ACC ensemble: 96.910
+    ECE average: 0.0189, ensemble: 0.0052
+    AUC: 0.9719698889827905
+
+
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-init6_5-lr0.1-slr0.02 --bayes mf --batch_size 256 --log_sigma_init_range -6 -5 --learning_rate 0.1 --log_sigma_lr 0.02
+    TOP1 average: 96.4033, ensemble: 96.9500, deter: 96.9100
+    TOP5 average: 99.9114, ensemble: 99.9600, deter: 99.9500
+    LOS average: 0.1318, ensemble: 0.0935, deter: 0.1240
+    ECE average: 0.0186, ensemble: 0.0053, deter: 0.0193
+    NAT vs. OOD: AUC 0.9617999154886295
+
+
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-init7_6 --bayes mf --batch_size 256 --log_sigma_init_range -7 -6 (gpu16)
+    TOP1 average: 96.8001, ensemble: 97.0700, deter: 97.0000
+    TOP5 average: 99.9338, ensemble: 99.9700, deter: 99.9600
+    LOS average: 0.1218, ensemble: 0.0991, deter: 0.1184
+    ECE average: 0.0172, ensemble: 0.0112, deter: 0.0178
+    NAT vs. OOD: AUC 0.9768871734787953
+
+
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-init6_5-decay1 --bayes mf --batch_size 256 --log_sigma_init_range -6 -5 --decay 0.0001
+    TOP1 average: 96.2388, ensemble: 96.7900, deter: 96.870
+    TOP5 average: 99.8705, ensemble: 99.9100, deter: 99.910
+    LOS average: 0.1692, ensemble: 0.1143, deter: 0.16267
+    ECE average: 0.0238, ensemble: 0.0109, deter: -
+    NAT vs. OOD: AUC 0.9770270647664413
+
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-init6_5-decay3 --bayes mf --batch_size 256 --log_sigma_init_range -6 -5 --decay 0.0003 (gpu20)
+    TOP1 average: 96.2153, ensemble: 96.8900, deter: 96.9600
+    TOP5 average: 99.8978, ensemble: 99.9500, deter: 99.9600
+    LOS average: 0.1456, ensemble: 0.0918, deter: 0.1354
+    ECE average: 0.0216, ensemble: 0.0050, deter: 0.0208
+
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-init7_6-decay0.001 --bayes mf --batch_size 256 --log_sigma_init_range -7 -6 --decay 0.001 (gpu19)
+    TOP1 average: 96.2138, ensemble: 96.5800, deter: 96.6400
+    TOP5 average: 99.9483, ensemble: 99.9900, deter: 99.9800
+    LOS average: 0.1318, ensemble: 0.1035, deter: 0.1216
+    ECE average: 0.0169, ensemble: 0.0066, deter: 0.0182
+    NAT vs. OOD: AUC 0.9619176590350337
+'''
+
+--------------------------------
+main results:
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-init6_5-decay2 --bayes mf --batch_size 256 --log_sigma_init_range -6 -5 --decay 0.0002 (gpu16) (-----------------use this----------------)
+TOP1 average: 96.3840, ensemble: 97.0700, deter: 97.0900
+TOP5 average: 99.9122, ensemble: 99.9700, deter: 99.9400
+LOS average: 0.1434, ensemble: 0.0945, deter: 0.1286
+ECE average: 0.0207, ensemble: 0.0046, deter: 0.0184
+-----------------adv samples-----------------
+TOP1 average: 0.9021, ensemble: 0.6600
+TOP5 average: 60.4576, ensemble: 64.3700
+LOS  average: 15.9003, ensemble: 14.0497
+NAT vs. ADV: AUC 0.293878985
+NAT vs. OOD: AUC 0.9745683524124155
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-init6_5-decay2-2 --bayes mf --batch_size 256 --log_sigma_init_range -6 -5 --decay 0.0002 (gpu28)
+TOP1 average: 96.3329, ensemble: 96.9800, deter: 96.9600
+TOP5 average: 99.8857, ensemble: 99.9200, deter: 99.9200
+LOS average: 0.1500, ensemble: 0.0971, deter: 0.1385
+ECE average: 0.0215, ensemble: 0.0066, deter: 0.0202
+NAT vs. OOD: AUC 0.9778137215734481
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-init6_5-decay2-3 --bayes mf --batch_size 256 --log_sigma_init_range -6 -5 --decay 0.0002 (28)
+TOP1 average: 96.2686, ensemble: 96.9500, deter: 96.9800
+TOP5 average: 99.9084, ensemble: 99.9600, deter: 99.9700
+LOS  average: 0.1480, ensemble: 0.0961, deter: 0.1418
+ECE  average: 0.0217, ensemble: 0.0069, deter: 0.0211
+NAT vs. OOD: AUC 0.9769021012599878
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-init6_5-2 --bayes mf --batch_size 256 --log_sigma_init_range -6 -5 (gpu31)
+TOP1 average: 95.9381, ensemble: 96.8100, deter: 96.8500
+TOP5 average: 99.9150, ensemble: 99.9400, deter: 99.9800
+LOS average: 0.1420, ensemble: 0.0924, deter: 0.1207
+ECE average: 0.0190, ensemble: 0.0046, deter: 0.0184
+NAT vs. OOD: AUC 0.9866996369852489
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-single_eps-init6_5-decay2 --bayes mf --batch_size 256 --log_sigma_init_range -6 -5 --decay 0.0002 --single_eps (gpu19)
+TOP1 average: 95.9559, ensemble: 96.9400, deter: 96.9200
+TOP5 average: 99.8620, ensemble: 99.9200, deter: 99.9100
+LOS average: 0.1646, ensemble: 0.0980, deter: 0.1450
+ECE average: 0.0232, ensemble: 0.0035, deter: 0.0214
+-----------------adv samples-----------------
+TOP1 average: 1.2417, ensemble: 0.8500
+TOP5 average: 57.9456, ensemble: 61.7600
+LOS  average: 14.9108, ensemble: 12.5976
+NAT vs. ADV: AUC 0.33905411999999996
+-----------------ood samples-----------------
+NAT vs. OOD: AUC 0.9822874500614627
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id bayes-single_eps-init6_5 --bayes mf --batch_size 256 --log_sigma_init_range -6 -5 --single_eps (gpu16)
+TOP1 average: 94.9018, ensemble: 96.7300, deter: 96.7500
+TOP5 average: 99.8344, ensemble: 99.9500, deter: 99.9100
+LOS average: 0.1849, ensemble: 0.1042, deter: 0.1373
+ECE average: 0.0239, ensemble: 0.0145, deter: 0.0218
+NAT vs. OOD: AUC 0.9789267593730793
+
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id map-decay2 --batch_size 256 --decay 0.0002 (20)
+TOP1 deter: 96.9200  [Best : Accuracy=97.11, Error=2.89]
+TOP5 deter: 99.9400
+LOS  deter: 0.1312
+ECE  deter: 0.0198
+TOP1 adv: 1.1500
+TOP5 adv: 56.4100
+LOS  adv: 14.5569
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id map --batch_size 256 --dist-port 2345 (20)
+TOP1 deter: 96.7600  [Best : Accuracy=96.90, Error=3.10]
+TOP5 deter: 99.9100
+LOS  deter: 0.1222
+ECE  deter: 0.0181
+
+
+
+
+
+
+
+
+
+------------------------------------------imagenet---------------------------------------------
+python -m torch.distributed.launch --nproc_per_node=8  main_in_amp.py  --opt-level O2 --job-id map (gpu33)
+TOP1 deter: 76.4340
+TOP5 deter: 93.1340
+LOS  deter: 0.9368
+ECE  deter: 0.0338
+TOP1 adv: 8.6000
+TOP5 adv: 31.0000
+LOS  adv: 6.3317
+
+python -m torch.distributed.launch --nproc_per_node=8  main_in_amp.py  --opt-level O2 --job-id bayes-init6_5-single_eps --bayes mf --log_sigma_init_range -6 -5 --single_eps (train 29  test 32)
+-----------------normal samples-----------------
+TOP1 average: 73.3047, ensemble: 76.2160, deter: 76.0520
+TOP5 average: 91.4994, ensemble: 92.9740, deter: 92.9380
+LOS  average: 1.0708, ensemble: 0.9362, deter: 0.9591
+ECE  average: 0.0297, ensemble: 0.0323, deter: 0.0408
+-----------------adv samples-----------------
+TOP1 average: 9.1330, ensemble: 8.9000
+TOP5 average: 29.0790, ensemble: 31.5000
+LOS  average: 6.1215, ensemble: 5.4838
+NAT vs. ADV: AUC 0.84458716
+
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main_in.py  --job-id bayes-init6_5-warmup-decay1e_5-single_eps --bayes mf --log_sigma_init_range -6 -5 --decay 1e-5 --single_eps (gpu29)
+-----------------normal samples-----------------
+TOP1 average: 73.8933, ensemble: 74.4320, deter: 74.3880
+TOP5 average: 91.4136, ensemble: 91.7040, deter: 91.6360
+LOS  average: 1.1020, ensemble: 1.0592, deter: 1.0797
+ECE  average: 0.0631, ensemble: 0.0499, deter: 0.0631
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main_in.py  --job-id bayes-init6_5-warmup --bayes mf --log_sigma_init_range -6 -5 (gpu33)
+-----------------normal samples-----------------
+TOP1 average: 74.1992, ensemble: 76.0080, deter: 75.8920
+TOP5 average: 92.0315, ensemble: 92.9100, deter: 92.8140
+LOS  average: 1.0341, ensemble: 0.9437, deter: 0.9737
+ECE  average: 0.0321, ensemble: 0.0186, deter: 0.0416
+-----------------adv samples-----------------
+TOP1 average: 9.4040, ensemble: 9.7000
+TOP5 average: 32.4650, ensemble: 33.7000
+LOS  average: 5.9577, ensemble: 5.5127
+NAT vs. ADV: AUC 0.83189645
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main_in.py  --job-id bayes-init6_5-warmup-decay1e_5 --bayes mf --log_sigma_init_range -6 -5 --decay 1e-5
+-----------------normal samples--------
+TOP1 average: 73.8297, ensemble: 74.3400, deter: 74.2920
+TOP5 average: 91.6480, ensemble: 91.9560, deter: 91.9020
+LOS  average: 1.0924, ensemble: 1.0564, deter: 1.0741
+ECE  average: 0.0631, ensemble: 0.0514, deter: 0.0628
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main_in.py  --job-id bayes-init6_5-warmup-decay5e_5 --bayes mf --log_sigma_init_range -6 -5 --decay 5e-5
+-----------------normal samples-----------------
+TOP1 average: 74.9554, ensemble: 76.2920, deter: 76.2300
+TOP5 average: 92.2705, ensemble: 92.9900, deter: 92.8960
+LOS  average: 1.0102, ensemble: 0.9361, deter: 0.9642
+ECE  average: 0.0377, ensemble: 0.0148, deter: 0.0417
+-----------------adv samples-----------------
+TOP1 average: 9.6320, ensemble: 9.8000
+TOP5 average: 30.7710, ensemble: 32.2000
+LOS  average: 6.2545, ensemble: 5.8741
+NAT vs. ADV: AUC 0.8305606
+
+
+
+############################################################
+############################################################
+############################################################
+############################################################
+############################################################
+
+
+********************comparison results Cifar10********************
+map-decay2 (gpu20, test on gpu22)
+CUDA_VISIBLE_DEVICES=0,1,2,3 python finetune.py --cutout  --job-id map-decay2 --evaluate
+TOP1 average: 96.9200, ensemble: 96.9200, deter: 96.9200
+TOP5 average: 99.9400, ensemble: 99.9400, deter: 99.9400
+LOS  average: 0.1312, ensemble: 0.1312, deter: 0.1312
+ECE  ensemble: 0.0198, deter: 0.0198
+ADV ensemble TOP1: 0.0000, TOP5: 0.5700, LOS: 18.3926
+NAT vs. ADV: AP 0.3069515839524861
+NAT vs. Fake (SNGAN): AP 0.8002712093984623
+NAT vs. Fake (PGGAN): AP 0.7886813600864744
+
+
+bayes-init6_5-decay2-2 (gpu28, test on gpu22)
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune.py --cutout  --job-id bayes-init6_5-decay2-2 --bayes mf --evaluate --resume /data/zhijie/snapshots_ab_28/bayes-init6_5-decay2-2/checkpoint.pth.tar --batch_size 256
+TOP1 average: 96.2877, ensemble: 97.0200, deter: 96.9600
+TOP5 average: 99.8880, ensemble: 99.9200, deter: 99.9200
+LOS  average: 0.1507, ensemble: 0.0975, deter: 0.1385
+ECE  ensemble: 0.0055, deter: 0.0202
+ADV ensemble TOP1: 0.0000, TOP5: 1.8000, LOS: 18.3406
+NAT vs. ADV: AP 0.3074828174867896
+NAT vs. Fake (SNGAN): AP 0.7985546979053886
+NAT vs. Fake (PGGAN): AP 0.79343091187952
+
+
+
+MC dropout (gpu28)
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main.py --cutout --job-id map-decay2-dp0.3 --batch_size 256 --decay 0.0002 --dropout_rate 0.3
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune.py --cutout  --job-id map-decay2-dp0.3 --evaluate --dropout_rate 0.3 --resume /data/zhijie/snapshots_ab/map-decay2-dp0.3/checkpoint.pth.tar
+TOP1 average: 96.5694, ensemble: 96.9500, deter: 96.9500
+TOP5 average: 99.9038, ensemble: 99.9200, deter: 99.9200
+LOS  average: 0.1508, ensemble: 0.1151, deter: 0.1393
+ECE  ensemble: 0.0119, deter: 0.0191
+ADV ensemble TOP1: 0.0100, TOP5: 1.1700, LOS: 18.3703
+NAT vs. ADV: AP 0.30831969783745766
+NAT vs. Fake (SNGAN): AP 0.8025943840592924
+NAT vs. Fake (PGGAN): AP 0.7918239437786739
+
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune.py --cutout  --job-id ft-gan1000-.75 --bayes mf  --epochs 40 --schedule  10 20 30 --num_gan 1000 --mi_th 0.75 --dist-port 2345 (gpu31)
+TOP1 average: 96.1372, ensemble: 96.8200, deter: 96.8800
+TOP5 average: 99.8812, ensemble: 99.9000, deter: 99.9200
+LOS  average: 0.1536, ensemble: 0.1004, deter: 0.1413
+ECE  ensemble: 0.0057, deter: 0.0203
+ADV ensemble TOP1: 0.0600, TOP5: 9.1700, LOS: 9.7172
+NAT vs. ADV: AP 0.9928181005376041
+NAT vs. Fake (SNGAN): AP 0.994118985929459
+NAT vs. Fake (PGGAN): AP 0.9319207161205818
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune.py --cutout  --job-id ft-gan1000-n1 --bayes mf  --epochs 40 --schedule  10 20 30 --num_gan 1000 --mi_th -1 --dist-port 2345
+TOP1 average: 96.6844, ensemble: 97.0900, deter: 97.0800
+TOP5 average: 99.9050, ensemble: 99.9500, deter: 99.9100
+LOS  average: 0.1359, ensemble: 0.0945, deter: 0.1293
+ECE  ensemble: 0.0094, deter: 0.0199
+ADV ensemble TOP1: 0.0000, TOP5: 0.4800, LOS: 18.3889
+NAT vs. ADV: AP 0.30705156883368023
+NAT vs. Fake (SNGAN): AP 0.8059908324010812
+NAT vs. Fake (PGGAN): AP 0.8025705087635004
+
+with mutual information attack:
+ADV ensemble TOP1: 2.9100, TOP5: 32.9600, LOS: 12.5491
+NAT vs. ADV: AP 0.9734482859711405
+
+without:
+ADV ensemble TOP1: 2.8700, TOP5: 31.6800, LOS: 12.6857
+NAT vs. ADV: AP 0.9782718233577834
+
+
+********************comparison results ImageNet********************
+map-pretrained (pytorch pretrained)
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune_in.py --job-id map-pretrained --evaluate
+TOP1 average: 76.1300, ensemble: 76.1300, deter: 76.1300
+TOP5 average: 92.8620, ensemble: 92.8620, deter: 92.8620
+LOS  average: 0.9618, ensemble: 0.9618, deter: 0.9618
+ECE  ensemble: 0.0373, deter: 0.0373
+ADV ensemble TOP1: 0.0120, TOP5: 1.8600, LOS: 18.4160
+NAT vs. ADV: AP 0.3076762356269038
+NAT vs. ADV-dyp: AP 0.010678083688592273
+NAT vs. Fake: AP 0.009950229752132667
+
+'''
+  map (trained on gpu33, test on gpu28)
+  CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune_in.py --job-id map --evaluate --resume /data/zhijie/snapshots_ab_in/map/checkpoint.pth.tar
+  TOP1 average: 76.4340, ensemble: 76.4340, deter: 76.4340
+  TOP5 average: 93.1340, ensemble: 93.1340, deter: 93.1340
+  LOS  average: 0.9368, ensemble: 0.9368, deter: 0.9368
+  ECE  ensemble: 0.0338, deter: 0.0338
+  ADV ensemble TOP1: 0.0220, TOP5: 1.3980, LOS: 18.4134
+  NAT vs. ADV: AP 0.30781660309639663 AUC 0.023401580400000004
+  NAT vs. NOISE: AP 0.9951129447639612 AUC 0.9981057418
+'''
+
+bayes-init6_5-warmup (trained on gpu33, test on gpu30)
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune_in.py --job-id bayes-init6_5-warmup --evaluate --resume /data/zhijie/snapshots_ab_in/bayes-init6_5-warmup/checkpoint.pth.tar --bayes mf
+TOP1 average: 74.2130, ensemble: 75.9720, deter: 75.8920
+TOP5 average: 92.0359, ensemble: 92.9460, deter: 92.8140
+LOS  average: 1.0341, ensemble: 0.9435, deter: 0.9737
+ECE  ensemble: 0.0183, deter: 0.0416
+ADV ensemble TOP1: 0.0000, TOP5: 0.8160, LOS: 18.4179
+NAT vs. ADV: AP 0.30973053707639275
+NAT vs. ADV-dyp: AP 0.2020664824152502
+NAT vs. Fake: AP 0.02093024950869566
+
+
+MC dropout (gpu30)
+python -m torch.distributed.launch --nproc_per_node=8  main_in_amp.py  --opt-level O2 --job-id map-dp0.2-afterconv --dropout_rate 0.2
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune_in.py --job-id map-dp0.2-afterconv --evaluate --resume /data/zhijie/snapshots_ab_in/map-dp0.2-afterconv/checkpoint.pth.tar --dropout_rate 0.2
+TOP1 average: 73.4980, ensemble: 74.8780, deter: 73.5340
+TOP5 average: 91.5848, ensemble: 92.3180, deter: 91.7500
+LOS  average: 1.0547, ensemble: 0.9884, deter: 1.0990
+ECE  ensemble: 0.0152, deter: 0.0684
+ADV ensemble TOP1: 0.0000, TOP5: 0.6700, LOS: 18.4169
+NAT vs. ADV: AP 0.30946910725795973
+NAT vs. ADV-dyp: AP 0.02654366210492517
+NAT vs. Fake: AP 0.012238066607599796
+
+
+'''
+  wrong adv & fake
+  CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune_in.py --job-id ft-gan-.65-.5 --bayes mf --epochs 12 --schedule 3 6 9 --log_sigma_init_range -6 -5 --num_gan 1000 --mi_th 0.65 --epsilon_scale 0.5 (gpu30)
+  TOP1 average: 73.3972, ensemble: 76.2000, deter: 75.9500
+  TOP5 average: 91.4785, ensemble: 93.0080, deter: 92.7540
+  LOS  average: 1.1110, ensemble: 0.9445, deter: 1.0260
+  ECE  ensemble: 0.0173, deter: 0.0685
+  ADV ensemble TOP1: 0.0000, TOP5: 0.0460, LOS: 18.3608
+  NAT vs. ADV: AP 0.906890914337793
+  NAT vs. ADV-dyp: AP 0.048410809001655175
+  NAT vs. Fake: AP 0.9005469276497294
+
+  CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune_in.py --job-id ft-gan-.75-1 --bayes mf --epochs 12 --schedule 3 6 9 --log_sigma_init_range -6 -5 --num_gan 1000 --mi_th 0.75 --epsilon_scale 1 (gpu30)
+  TOP1 average: 73.4233, ensemble: 76.2280, deter: 76.0560
+  TOP5 average: 91.4958, ensemble: 92.9340, deter: 92.7320
+  LOS  average: 1.1058, ensemble: 0.9417, deter: 1.0205
+  ECE  ensemble: 0.0165, deter: 0.0661
+  ADV ensemble TOP1: 0.0060, TOP5: 0.0520, LOS: 18.0472
+  NAT vs. ADV: AP 0.9861936160870471
+  NAT vs. ADV-dyp: AP 0.0518477879988215
+  NAT vs. Fake: AP 0.9402013572839395
+'''
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune_in.py --job-id ft-gan-.75-1-alpha3 --alpha 3 --bayes mf --epochs 12 --schedule 3 6 9 --log_sigma_init_range -6 -5 --num_gan 1000 --mi_th 0.75 --epsilon_scale 1
+TOP1 average: 73.4799, ensemble: 76.2620, deter: 75.9780
+TOP5 average: 91.5454, ensemble: 92.9560, deter: 92.8040
+LOS  average: 1.1078, ensemble: 0.9428, deter: 1.0294
+ECE  ensemble: 0.0164, deter: 0.0699
+ADV ensemble TOP1: 0.0020, TOP5: 0.0440, LOS: 18.0667
+NAT vs. ADV: AP 0.9641222035589786
+NAT vs. ADV-dyp: AP 0.8822051478537718
+NAT vs. Fake: AP 0.848429935602232
+
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune_in.py --job-id ft-gan-.75-n1 --bayes mf --epochs 12 --schedule 3 6 9 --log_sigma_init_range -6 -5 --num_gan 1000 --mi_th -1 --epsilon_scale 1
+TOP1 average: 73.7157, ensemble: 76.4900, deter: 76.2840
+TOP5 average: 91.6830, ensemble: 93.1040, deter: 92.9000
+LOS  average: 1.1005, ensemble: 0.9337, deter: 1.0165
+ECE  ensemble: 0.0159, deter: 0.0691
+ADV ensemble TOP1: 0.0060, TOP5: 0.1900, LOS: 18.4191
+NAT vs. ADV: AP 0.38725916291409423
+NAT vs. ADV-dyp: AP 0.01888261313854362
+NAT vs. Fake: AP 0.012827708686034774
+
+
+
+------------------face------------------
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main_face.py  --job-id map-ft0.01-drop0-decay5 --dist-port 2345 --ft_learning_rate 0.01 --epochs 90 --schedule 30 60 80 --dropout_rate 0 --decay 5e-4
+**Test** lfw: 0.982
+**Test** vgg2_fp: 0.917
+**Test** agedb_30: 0.853
+**Test** lfw: 0.982
+**Test** cplfw: 0.840
+**Test** calfw: 0.876
+**Test** cfp_ff: 0.978
+**Test** cfp_fp: 0.927
+lfw vs. adversarial: AP 0.19094083753975927
+cfp_ff vs. adversarial: AP 0.21074818348108676
+cfp_fp vs. adversarial: AP 0.20508208988841675
+agedb_30 vs. adversarial: AP 0.1991486930509151
+calfw vs. adversarial: AP 0.19086844455351998
+cplfw vs. adversarial: AP 0.192091353455812
+vgg2_fp vs. adversarial: AP 0.19993527310960896
+lfw vs. DeepFake: AP 0.3888139929267522
+cfp_ff vs. DeepFake: AP 0.3944219602281492
+cfp_fp vs. DeepFake: AP 0.45397119454343504
+agedb_30 vs. DeepFake: AP 0.43703371331709734
+calfw vs. DeepFake: AP 0.37499997351948505
+cplfw vs. DeepFake: AP 0.45598245501152035
+vgg2_fp vs. DeepFake: AP 0.518570027580809
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main_face.py  --job-id map_dp0.2 --dist-port 2345 --ft_learning_rate 0.01 --epochs 90 --schedule 30 60 80 --dropout_rate 0.2 --decay 5e-4 (g30)
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune_face.py --job-id map_dp0.2 --decay 5e-4 --dropout_rate 0.2 --resume /data/zhijie/snapshots_ab_face/map_dp0.2/checkpoint.pth.tar --evaluate
+  **Test** vgg2_fp: 0.926
+  **Test** lfw: 0.982
+  **Test** calfw: 0.873
+  **Test** lfw: 0.982
+  **Test** cplfw: 0.836
+  **Test** agedb_30: 0.860
+  **Test** cfp_fp: 0.928
+  **Test** cfp_ff: 0.978
+  lfw vs. adversarial: AP 0.9650983096657905
+  cfp_ff vs. adversarial: AP 0.9649947343747007
+  cfp_fp vs. adversarial: AP 0.9491201011414386
+  agedb_30 vs. adversarial: AP 0.9521031483890143
+  calfw vs. adversarial: AP 0.958547425230214
+  cplfw vs. adversarial: AP 0.9456767118560521
+  vgg2_fp vs. adversarial: AP 0.9541252785702511
+  lfw vs. DeepFake: AP 0.8463449095591185
+  cfp_ff vs. DeepFake: AP 0.8738961565265466
+  cfp_fp vs. DeepFake: AP 0.6845730597224774
+  agedb_30 vs. DeepFake: AP 0.7848143329859396
+  calfw vs. DeepFake: AP 0.8621451021533579
+  cplfw vs. DeepFake: AP 0.6643450481794602
+  vgg2_fp vs. DeepFake: AP 0.7327053374846795
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python main_face.py  --job-id bayes-ft0.01-decay5 --dist-port 2345 --ft_learning_rate 0.01 --epochs 90 --schedule 30 60 80 --dropout_rate 0 --decay 5e-4 --bayes mf --log_sigma_init_range -6 -5 --fc_bayes mf (g31)
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune_face.py  --job-id bayes-ft0.01-decay5 --dist-port 2345 --dropout_rate 0 --decay 5e-4 --bayes mf --log_sigma_init_range -6 -5 --fc_bayes mf --resume /data/zhijie/snapshots_ab_face/bayes-ft0.01-decay5/checkpoint.pth.tar --evaluate
+  ---------------------------deterministic---------------------------
+    **Test** lfw: 0.976
+    **Test** vgg2_fp: 0.906
+    **Test** agedb_30: 0.834
+    **Test** cplfw: 0.825
+    **Test** lfw: 0.976
+    **Test** calfw: 0.854
+    **Test** cfp_fp: 0.914
+    **Test** cfp_ff: 0.968
+  ---------------------------ensemble 20 times---------------------------
+    **Test** vgg2_fp: 0.905
+    **Test** cplfw: 0.824
+    **Test** calfw: 0.857
+    **Test** lfw: 0.978
+    **Test** lfw: 0.976
+    **Test** agedb_30: 0.838
+    **Test** cfp_ff: 0.968
+    **Test** cfp_fp: 0.914
+  lfw vs. adversarial: AP 0.39907242024511796
+  cfp_ff vs. adversarial: AP 0.3897011372787077
+  cfp_fp vs. adversarial: AP 0.27069693284135243
+  agedb_30 vs. adversarial: AP 0.32693579340809314
+  calfw vs. adversarial: AP 0.42942431992945396
+  cplfw vs. adversarial: AP 0.28244546620897126
+  vgg2_fp vs. adversarial: AP 0.29128368631654866
+  lfw vs. DeepFake: AP 0.6207143637885404
+  cfp_ff vs. DeepFake: AP 0.5585735966485508
+  cfp_fp vs. DeepFake: AP 0.3554311296730994
+  agedb_30 vs. DeepFake: AP 0.5155672825286772
+  calfw vs. DeepFake: AP 0.6480144533424598
+  cplfw vs. DeepFake: AP 0.39871065086007934
+  vgg2_fp vs. DeepFake: AP 0.46945406359059577
+
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune_face.py --job-id ft-gan-.75-1-epo16-d1 --bayes mf --epochs 16 --schedule 4 8 12 --log_sigma_init_range -6 -5 --num_gan 1000 --mi_th 0.75 --decay 5e-4 --fc_bayes mf --epsilon_scale 0.25
+---------------------------deterministic---------------------------
+  **Test** lfw: 0.984
+  **Test** vgg2_fp: 0.923
+  **Test** calfw: 0.868
+  **Test** agedb_30: 0.840
+  **Test** cplfw: 0.835
+  **Test** cfp_ff: 0.976
+  **Test** cfp_fp: 0.923
+  **Test** lfw: 0.984
+---------------------------ensemble 20 times---------------------------
+  **Test** vgg2_fp: 0.925
+  **Test** lfw: 0.984
+  **Test** lfw: 0.985
+  **Test** calfw: 0.874
+  **Test** agedb_30: 0.848
+  **Test** cplfw: 0.841
+  **Test** cfp_ff: 0.979
+  **Test** cfp_fp: 0.931
+lfw vs. adversarial: AP 0.9977498703516411
+cfp_ff vs. adversarial: AP 0.9991508316246622
+cfp_fp vs. adversarial: AP 0.9831099171369131
+agedb_30 vs. adversarial: AP 0.9945399360251359
+calfw vs. adversarial: AP 0.9991799435148049
+cplfw vs. adversarial: AP 0.9805801450434909
+vgg2_fp vs. adversarial: AP 0.9903706043744813
+lfw vs. DeepFake: AP 0.9980339404432275
+cfp_ff vs. DeepFake: AP 0.9988281211507416
+cfp_fp vs. DeepFake: AP 0.9859371952724493
+agedb_30 vs. DeepFake: AP 0.9958904677321578
+calfw vs. DeepFake: AP 0.99914256527742
+cplfw vs. DeepFake: AP 0.9874242913672213
+vgg2_fp vs. DeepFake: AP 0.9940248726546536
+
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python finetune_face.py --job-id ft-gan-.75-n1-epo16-d1 --bayes mf --epochs 16 --schedule 4 8 12 --log_sigma_init_range -6 -5 --num_gan 1000 --mi_th -1 --decay 5e-4 --fc_bayes mf --epsilon_scale 0.25
+---------------------------deterministic---------------------------
+  **Test** vgg2_fp: 0.922
+  **Test** calfw: 0.868
+  **Test** lfw: 0.981
+  **Test** agedb_30: 0.849
+  **Test** cplfw: 0.841
+  **Test** cfp_ff: 0.977
+  **Test** cfp_fp: 0.925
+  **Test** lfw: 0.981
+---------------------------ensemble 20 times---------------------------
+  **Test** vgg2_fp: 0.923
+  **Test** agedb_30: 0.851
+  **Test** lfw: 0.984
+  **Test** calfw: 0.873
+  **Test** cplfw: 0.844
+  **Test** lfw: 0.985
+  **Test** cfp_fp: 0.927
+  **Test** cfp_ff: 0.977
+lfw vs. adversarial: AP 0.18925240869955595
+cfp_ff vs. adversarial: AP 0.19279349331407336
+cfp_fp vs. adversarial: AP 0.19094527663655986
+agedb_30 vs. adversarial: AP 0.1903791039847409
+calfw vs. adversarial: AP 0.18933033170215016
+cplfw vs. adversarial: AP 0.18918946350191557
+vgg2_fp vs. adversarial: AP 0.190519639740361
+lfw vs. DeepFake: AP 0.2729052971168897
+cfp_ff vs. DeepFake: AP 0.2506460708212276
+cfp_fp vs. DeepFake: AP 0.24806772640814706
+agedb_30 vs. DeepFake: AP 0.274534569129783
+calfw vs. DeepFake: AP 0.273061447794243
+cplfw vs. DeepFake: AP 0.2727928077103426
+vgg2_fp vs. DeepFake: AP 0.30915559758441946
+
+
+todo 0: plot acc w.r.t. threshold
