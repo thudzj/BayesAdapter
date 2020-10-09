@@ -92,12 +92,9 @@ class _BayesConvNdMF(Module):
     def extra_repr(self):
         s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
              ', stride={stride}')
-        if self.padding != (0,) * len(self.padding):
-            s += ', padding={padding}'
-        if self.dilation != (1,) * len(self.dilation):
-            s += ', dilation={dilation}'
-        if self.groups != 1:
-            s += ', groups={groups}'
+        s += ', padding={padding}'
+        s += ', dilation={dilation}'
+        s += ', groups={groups}'
         if self.bias is False:
             s += ', bias=False'
         return s.format(**self.__dict__)

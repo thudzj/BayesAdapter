@@ -3,6 +3,7 @@ unused/*
 ckpts/*
 deepfake_samples/*
 gan_samples/*
+adv_samples/*
 laplace/*
 laplace_in/*
 __pycache__/*

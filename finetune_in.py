@@ -61,6 +61,7 @@ parser.add_argument('--num_gan', type=int, default=100)
 parser.add_argument('--aug_n', type=int, default=None)
 parser.add_argument('--aug_m', type=int, default=None)
 parser.add_argument('--mi_th', type=float, default=0.5)
+parser.add_argument('--bayes_location', type=int, nargs='+', default=[-1])
 
 # GAN generated data augmentation
 parser.add_argument('--blur_prob', type=float, default=0.5)
@@ -142,6 +143,7 @@ def main_worker(gpu, ngpus_per_node, args):
     log = (log, args.gpu)
 
     net = models.__dict__[args.arch](args)
+
     print_log("Python version : {}".format(sys.version.replace('\n', ' ')), log)
     print_log("PyTorch  version : {}".format(torch.__version__), log)
     print_log("CuDNN  version : {}".format(torch.backends.cudnn.version()), log)
@@ -156,22 +158,45 @@ def main_worker(gpu, ngpus_per_node, args):
         torch.cuda.set_device(args.gpu)
         net.cuda(args.gpu)
         args.batch_size = int(args.batch_size / ngpus_per_node)
-        net = torch.nn.parallel.DistributedDataParallel(net, device_ids=[args.gpu])
+        net = torch.nn.parallel.DistributedDataParallel(net, device_ids=[args.gpu], find_unused_parameters=True)
     else:
         torch.cuda.set_device(args.gpu)
         net = net.cuda(args.gpu)
 
+    freeze(net)
+    unfreeze(net, args)
     criterion = torch.nn.CrossEntropyLoss().cuda(args.gpu)
 
     mus, vars = [], []
-    for name, param in net.named_parameters():
-        if 'log_sigma' in name: vars.append(param)
-        else: assert(param.requires_grad); mus.append(param)
+    if -1 in args.bayes_location:
+        for name, param in net.module.fc.named_parameters():
+            if 'log_sigma' in name:
+                vars.append(param)
+                if args.gpu == 0: print("log_sigma", name)
+            else:
+                assert(param.requires_grad)
+                mus.append(param)
+                if args.gpu == 0: print("mu", name)
+    for loc in args.bayes_location:
+        if loc == -1: continue
+        loc += 1
+        for name, param in net.module.layer4[loc].named_parameters():
+            if 'log_sigma' in name:
+                vars.append(param)
+                if args.gpu == 0: print("log_sigma", name)
+            else:
+                assert(param.requires_grad)
+                mus.append(param)
+                if args.gpu == 0: print("mu", name)
+
+    # for name, param in net.named_parameters():
+    #     if 'log_sigma' in name: vars.append(param)
+    #     else: assert(param.requires_grad); mus.append(param)
     optimizer = torch.optim.SGD(mus, args.learning_rate,
                                 momentum=args.momentum,
                                 weight_decay=args.decay)
     if args.bayes:
-        assert(len(mus) == len(vars))
+        if args.gpu == 0: print(len(mus), len(vars))
         var_optimizer = VarSGD(vars, args.log_sigma_lr, num_data=None,
                                momentum=args.momentum, weight_decay=args.decay)
     else:
@@ -209,34 +234,9 @@ def main_worker(gpu, ngpus_per_node, args):
     var_optimizer.num_data = len(train_loader.dataset)
 
     if args.evaluate:
-        net.apply(unfreeze)
-        # rets = ens_validate(test_loader, net, criterion, args, log, True, 100, suffix='_tmp')
-        # print_log('TOP1 average: {:.4f}, ensemble: {:.4f}'.format(rets[:,2].mean(), rets[-1][-3]), log)
-        # print_log('TOP5 average: {:.4f}, ensemble: {:.4f}'.format(rets[:,3].mean(), rets[-1][-2]), log)
-        # print_log('LOS  average: {:.4f}, ensemble: {:.4f}'.format(rets[:,1].mean(), rets[-1][-4]), log)
-        # print_log('ECE  ensemble: {:.4f}'.format(rets[-1][-1]), log)
-        # if args.gpu == 0: plot_ens(args.save_path, rets, deter_rets[0][2])
-
-        # while True:
-        #     ens_validate(fake_loader, net, criterion, args, log, True, 20, suffix='_fake')
-        #     if args.gpu == 0: print_log('NAT vs. Fake: AP {}'.format(plot_mi(args.save_path, 'fake')), log)
-        #
-        #     ens_validate(adv_loader, net, criterion, args, log, True, 20, suffix='_adv')
-        #     if args.gpu == 0: print_log('NAT vs. ADV-dyp: AP {}'.format(plot_mi(args.save_path, 'adv')), log)
         while True:
             evaluate(test_loader, test_loader1, fake_loader, adv_loader, net, criterion, args, log, 20, 100)
         return
-
-    # net.apply(freeze)
-    # deter_rets = ens_validate(test_loader, net, criterion, args, log, False, 1)
-    # if args.gpu == 0:
-    #     print(deter_rets)
-    # net.apply(unfreeze)
-    # deter_rets = ens_validate(fake_loader, adv_loader, net, criterion, args, log, True, 1)
-    # if args.gpu == 0:
-    #     print(deter_rets)
-    # if args.gpu == 0: print_log('NAT vs. ADV: AP {}'.format(plot_mi(args.save_path, 'advg')), log)
-    # evaluate(test_loader, test_loader1, fake_loader, adv_loader, net, criterion, args, log, 2)
 
     start_time = time.time()
     epoch_time = AverageMeter()
@@ -256,7 +256,7 @@ def main_worker(gpu, ngpus_per_node, args):
                     + ' [Best : Accuracy={:.2f}, Error={:.2f}]'.format(recorder.max_accuracy(False), 100-recorder.max_accuracy(False)), log)
 
         train_acc, train_los = train(train_loader, train_loader1, net, criterion, optimizer, var_optimizer, epoch, args, log)
-        if epoch == 5:
+        if epoch == 5 or epoch == 0:
             val_acc, val_los   = evaluate(test_loader, test_loader1, fake_loader, adv_loader, net, criterion, args, log, 2)
         else:
             val_acc, val_los = 0, 0
@@ -321,7 +321,7 @@ def train(train_loader, train_loader1, model, criterion, optimizer, var_optimize
         out1_0 = output[bs:bs+bs1].softmax(-1)
         out1_1 = output[bs+bs1:].softmax(-1)
         mi1 = ent((out1_0 + out1_1)/2.) - (ent(out1_0) + ent(out1_1))/2.
-        rank_loss = torch.nn.functional.relu(args.mi_th - mi1).mean() #rank_loss = torch.nn.functional.softplus(mi - mi1).mean()
+        rank_loss = torch.nn.functional.relu(args.mi_th - mi1).mean()
 
         prec1, prec5 = accuracy(output[:bs], target, topk=(1, 5))
         losses.update(loss.detach().item(), bs)
@@ -351,9 +351,9 @@ def train(train_loader, train_loader1, model, criterion, optimizer, var_optimize
     return top1.avg, losses.avg
 
 def evaluate(test_loader, test_loader1, fake_loader, adv_loader, net, criterion, args, log, nums=100, nums2=None):
-    if args.bayes: net.apply(freeze)
+    if args.bayes: freeze(net)
     deter_rets = ens_validate(test_loader, net, criterion, args, log, False, 1)
-    if args.bayes: net.apply(unfreeze)
+    if args.bayes: unfreeze(net, args)
     if not args.bayes and args.dropout_rate == 0: nums = 1; nums2=1
     if not nums2: nums2 = nums
 
@@ -587,12 +587,21 @@ def dist_collect(x):
     dist.all_gather(out_list, x)
     return torch.cat(out_list, dim=0)
 
-def freeze(m):
-    if isinstance(m, (BayesConv2dMF, BayesLinearMF, BayesBatchNorm2dMF)):
-        m.deterministic = True
+def freeze(net):
+    for idx, m in enumerate(net.modules()):
+        if isinstance(m, (BayesConv2dMF, BayesLinearMF, BayesBatchNorm2dMF)):
+            m.deterministic = True
 
-def unfreeze(m):
-    if isinstance(m, (BayesConv2dMF, BayesLinearMF, BayesBatchNorm2dMF)):
-        m.deterministic = False
+def unfreeze(net, args):
+    if -1 in args.bayes_location:
+        if args.gpu == 0: print("unfreeze", -1, '->', net.module.fc)
+        net.module.fc.deterministic = False
+    for loc in args.bayes_location:
+        if loc == -1: continue
+        loc += 1
+        if args.gpu == 0: print("unfreeze", loc - 1, '->', net.module.layer4[loc])
+        for m in net.module.layer4[loc].modules():
+            if isinstance(m, (BayesConv2dMF, BayesLinearMF, BayesBatchNorm2dMF)):
+                m.deterministic = False
 
 if __name__ == '__main__': main()
