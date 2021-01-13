@@ -9,3 +9,4 @@ laplace_in/*
 __pycache__/*
 *.pyc
 log.txt
+*.pdf
