@@ -1,5 +1,4 @@
 from torch import nn
-from mean_field import *
 from functools import partial
 
 __all__ = ['MobileNetV2', 'mobilenet_v2']
@@ -83,19 +82,12 @@ class MobileNetV2(nn.Module):
             norm_layer: Module specifying the normalization layer to use
         """
         super(MobileNetV2, self).__init__()
-        self.bayes = args.bayes
-        self.fc_bayes = args.fc_bayes
         self.num_classes = num_classes
 
         if block is None:
             block = InvertedResidual
 
-        if self.bayes is None:
-            conv_layer, linear_layer, norm_layer = nn.Conv2d, nn.Linear, nn.BatchNorm2d
-        elif self.bayes == 'mf':
-            conv_layer, linear_layer, norm_layer = partial(BayesConv2dMF, args.single_eps, args.local_reparam), partial(BayesLinearMF, args.single_eps, args.local_reparam) if self.fc_bayes else nn.Linear, partial(BayesBatchNorm2dMF, args.single_eps)
-        else:
-            raise NotImplementedError
+        conv_layer, linear_layer, norm_layer = nn.Conv2d, nn.Linear, nn.BatchNorm2d
 
         input_channel = 32
         last_channel = 1280
@@ -151,19 +143,6 @@ class MobileNetV2(nn.Module):
             elif isinstance(m, nn.Linear):
                 nn.init.normal_(m.weight, 0, 0.01)
                 nn.init.zeros_(m.bias)
-            elif isinstance(m, BayesConv2dMF):
-                nn.init.kaiming_normal_(m.weight_mu, mode='fan_out')
-                m.weight_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
-            elif isinstance(m, BayesBatchNorm2dMF):
-                nn.init.constant_(m.weight_mu, 1)
-                nn.init.constant_(m.bias_mu, 0)
-                m.weight_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
-                m.bias_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
-            elif isinstance(m, BayesLinearMF):
-                nn.init.normal_(m.weight_mu, 0, 0.01)
-                nn.init.zeros_(m.bias_mu)
-                m.weight_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
-                m.bias_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
 
     def _forward_impl(self, x, return_f=False, return_both=False):
         # This exists since TorchScript doesn't support inheritance, so the superclass method

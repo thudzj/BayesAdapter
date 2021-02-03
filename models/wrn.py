@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from torch.nn import init
-from mean_field import *
 from functools import partial
 
 class Block(nn.Module):
@@ -37,15 +36,7 @@ class WRN(nn.Module):
         # print ('WRN : Depth : {} , Widen Factor : {}'.format(depth, width))
 
         self.num_classes = num_classes
-        self.bayes = args.bayes
-
-        if self.bayes is None:
-            conv_layer, linear_layer, bn_layer = nn.Conv2d, nn.Linear, nn.BatchNorm2d
-        elif self.bayes == 'mf':
-            conv_layer, linear_layer, bn_layer = partial(BayesConv2dMF, args.single_eps, args.local_reparam), partial(BayesLinearMF, args.single_eps, args.local_reparam), partial(BayesBatchNorm2dMF, args.single_eps)
-        else:
-            raise NotImplementedError
-
+        conv_layer, linear_layer, bn_layer = nn.Conv2d, nn.Linear, nn.BatchNorm2d
 
         self.conv_3x3 = conv_layer(3, n_channels[0], kernel_size=3, stride=1, padding=1, bias=False)
 
@@ -68,19 +59,6 @@ class WRN(nn.Module):
             elif isinstance(m, nn.Linear):
                 init.kaiming_normal_(m.weight)
                 m.bias.data.zero_()
-            elif isinstance(m, BayesConv2dMF):
-                init.kaiming_normal_(m.weight_mu)
-                m.weight_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
-            elif isinstance(m, BayesBatchNorm2dMF):
-                m.weight_mu.data.fill_(1)
-                m.bias_mu.data.zero_()
-                m.weight_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
-                m.bias_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
-            elif isinstance(m, BayesLinearMF):
-                init.kaiming_normal_(m.weight_mu)
-                m.bias_mu.data.zero_()
-                m.weight_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
-                m.bias_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
 
     def _make_layer(self, in_planes, out_planes, num_blocks, stride, dropout_rate, conv_layer, bn_layer):
         blocks = []

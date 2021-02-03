@@ -1,7 +1,6 @@
 import math
 import torch
 import torch.nn as nn
-from mean_field import *
 from functools import partial
 
 
@@ -121,14 +120,7 @@ class ResNet(nn.Module):
                  groups=1, width_per_group=64, replace_stride_with_dilation=None):
         super(ResNet, self).__init__()
 
-        self.bayes = args.bayes
-
-        if self.bayes is None:
-            conv_layer, linear_layer, norm_layer = nn.Conv2d, nn.Linear, nn.BatchNorm2d
-        elif self.bayes == 'mf':
-            conv_layer, linear_layer, norm_layer = partial(BayesConv2dMF, args.single_eps, args.local_reparam), partial(BayesLinearMF, args.single_eps, args.local_reparam), partial(BayesBatchNorm2dMF, args.single_eps)
-        else:
-            raise NotImplementedError
+        conv_layer, linear_layer, norm_layer = nn.Conv2d, nn.Linear, nn.BatchNorm2d
 
         self.inplanes = 64
         self.dilation = 1
@@ -162,21 +154,6 @@ class ResNet(nn.Module):
             elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
-            elif isinstance(m, BayesConv2dMF):
-                nn.init.kaiming_normal_(m.weight_mu, mode='fan_out', nonlinearity='relu')
-                m.weight_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
-            elif isinstance(m, BayesBatchNorm2dMF):
-                nn.init.constant_(m.weight_mu, 1)
-                nn.init.constant_(m.bias_mu, 0)
-                m.weight_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
-                m.bias_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
-            elif isinstance(m, BayesLinearMF):
-                nn.init.kaiming_uniform_(m.weight_mu, a=math.sqrt(5))
-                fan_in, _ = nn.init._calculate_fan_in_and_fan_out(m.weight_mu)
-                bound = 1 / math.sqrt(fan_in)
-                nn.init.uniform_(m.bias_mu, -bound, bound)
-                m.weight_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
-                m.bias_log_sigma.data.uniform_(args.log_sigma_init_range[0], args.log_sigma_init_range[1])
 
         # Zero-initialize the last BN in each residual branch,
         # so that the residual branch starts with zeros, and each residual block behaves like an identity.
@@ -184,11 +161,9 @@ class ResNet(nn.Module):
         if zero_init_residual:
             for m in self.modules():
                 if isinstance(m, Bottleneck):
-                    if self.bayes: nn.init.constant_(m.bn3.weight_mu, 0)
-                    else: nn.init.constant_(m.bn3.weight, 0)
+                    nn.init.constant_(m.bn3.weight, 0)
                 elif isinstance(m, BasicBlock):
-                    if self.bayes: nn.init.constant_(m.bn2.weight_mu, 0)
-                    else: nn.init.constant_(m.bn2.weight, 0)
+                    nn.init.constant_(m.bn2.weight, 0)
 
     def _make_layer(self, conv_layer, norm_layer, block, planes, blocks, stride=1, dilate=False, dropout_rate=0.):
         downsample = None

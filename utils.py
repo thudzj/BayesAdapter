@@ -297,8 +297,8 @@ def plot_mi(dir_, type_, type2_=None):
 
     if type_ == 'advg':
         label_ = 'Adversarial'
-    elif type_ == 'adv':
-        label_ = 'adversarial-T'
+    elif type_ == 'extra_ood':
+        label_ = 'Extra OOD'
     elif 'adv_' in type_:
         label_ = 'Adversarial'
     elif type_ == "svhn":
@@ -308,8 +308,6 @@ def plot_mi(dir_, type_, type2_=None):
     elif type_ == "noise":
         label_ = 'noise'
     elif type_ == "fake":
-        label_ = 'Fake'
-    elif type_ == "fake2":
         label_ = 'Fake'
     else:
         raise NotImplementedError
@@ -357,7 +355,7 @@ def plot_ens(dir_, rets, baseline_acc):
     ax1.set_xticks([1,] + list(np.arange(20, rets.shape[0]+1, 20)))
     ax1.set_ylim((min_acc, max_acc))
     ax1.set_xlim((1, rets.shape[0]))
-    ax1.set_xlabel('The number of MC sample')
+    ax1.set_xlabel('The number of MC samples')
     ax1.set_ylabel('Test accuracy (%)')
     # ax2 = ax1.twinx()
     # l3 = ax2.plot(rets[:, 0]+1, rets[:, 4], color=color[2], lw=lw, alpha=0.6)
@@ -454,7 +452,7 @@ def load_dataset_ft(args):
         if args.cutout: train_transform.transforms.append(Cutout(n_holes=1, length=16))
         train_data = dataset(args.data_path, train=True, transform=train_transform, download=True)
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_data) if args.distributed else None
-        train_loader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size//2, shuffle=(train_sampler is None), num_workers=args.workers, pin_memory=True, sampler=train_sampler)
+        train_loader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size//(2 if args.alpha > 0 else 1), shuffle=(train_sampler is None), num_workers=args.workers, pin_memory=True, sampler=train_sampler)
 
         train_data1 = CIFARR(args, args.epsilon*args.epsilon_scale, transform_last=transforms.Normalize(mean, std),
                             transform=transforms.Compose([transforms.RandomHorizontalFlip(),
@@ -575,7 +573,7 @@ def load_dataset_in_ft(args):
         ]))
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if args.distributed else None
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size//2, shuffle=(train_sampler is None),
+        train_dataset, batch_size=args.batch_size//(2 if args.alpha > 0 else 1), shuffle=(train_sampler is None),
         num_workers=args.workers, pin_memory=True, sampler=train_sampler)
 
     train_dataset1 = ImageNetR(args, args.epsilon*args.epsilon_scale, transform_last=normalize,
@@ -909,7 +907,7 @@ def load_dataset_face_ft(args, INPUT_SIZE=[112, 112],
     else:
         train_sampler = torch.utils.data.sampler.WeightedRandomSampler(weights, len(weights))
     train_loader = torch.utils.data.DataLoader(
-        train_data, batch_size = args.batch_size//2, shuffle=(train_sampler is None),
+        train_data, batch_size = args.batch_size//(2 if args.alpha > 0 else 1), shuffle=(train_sampler is None),
         num_workers=args.workers, pin_memory=True, sampler = train_sampler
     )
 
@@ -943,7 +941,7 @@ def load_dataset_face_ft(args, INPUT_SIZE=[112, 112],
         val_data_tensor = torch.tensor(carray[:, [2, 1, 0], :, :]) * 0.5 + 0.5
         val_data = TensorsDataset(val_data_tensor, val_transform)
         val_loader = torch.utils.data.DataLoader(
-            val_data, batch_size = args.batch_size, shuffle=False,
+            val_data, batch_size = args.batch_size//2, shuffle=False,
             num_workers=args.workers, pin_memory=True, sampler=None)
         issame = np.load('{}/{}_list.npy'.format(args.data_path, name))
         val_loaders.append((name, val_loader, issame))

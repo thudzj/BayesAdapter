@@ -3,6 +3,7 @@ import os, sys, shutil, time, random, math
 import argparse
 import warnings
 import numpy as np
+from contextlib import suppress
 warnings.filterwarnings("ignore")
 
 import torch
@@ -15,21 +16,25 @@ import torch.utils.data.distributed
 
 import models.mobilenet as models
 from utils import AverageMeter, RecorderMeter, time_string, convert_secs2time, load_dataset_face_ft, plot_mi, ent
-from mean_field import *
 from verification import verify
 
-model_names = sorted(name for name in models.__dict__ if name.islower() and not name.startswith("__") and callable(models.__dict__[name]))
+sys.path.insert(0, '/data/zhijie/ScalableBDL/')
+from scalablebdl.low_rank import to_bayesian as to_bayesian_lr
+from scalablebdl.mean_field import to_bayesian as to_bayesian_mf
+from scalablebdl.bnn_utils import freeze, unfreeze, set_mc_sample_id
+from scalablebdl.prior_reg import PriorRegularizor
 
-parser = argparse.ArgumentParser(description='Training script for face recognition', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser = argparse.ArgumentParser(description='Bayesian fine-tuning script',
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 # Data / Model
 parser.add_argument('--data_path', metavar='DPATH', default='/data/xiaoyang/data/faces_emore/', type=str, help='Path to dataset')
-parser.add_argument('--arch', metavar='ARCH', default='mobilenet_v2', help='model architecture: ' + ' | '.join(model_names) + ' (default: mobilenet_v2)')
+parser.add_argument('--arch', metavar='ARCH', default='mobilenet_v2', help='model architecture')
 
 # Optimization
 parser.add_argument('--epochs', metavar='N', type=int, default=90, help='Number of epochs to train.')
 parser.add_argument('--batch_size', type=int, default=256, help='Batch size.')
-parser.add_argument('--learning_rate', type=float, default=0.1, help='The Learning Rate.')
+parser.add_argument('--ft_lr', type=float, default=1e-4, help='The Learning Rate.')
 parser.add_argument('--momentum', type=float, default=0.9, help='Momentum.')
 parser.add_argument('--schedule', type=int, nargs='+', default=[1, 2, 3], help='Decrease learning rate at these epochs.')
 parser.add_argument('--gammas', type=float, nargs='+', default=[0.1, 0.1, 0.1], help='LR is multiplied by gamma on schedule')
@@ -53,17 +58,22 @@ parser.add_argument('--job-id', type=str, default='')
 
 # Bayesian
 parser.add_argument('--bayes', type=str, default=None, help='Bayes type: None, mean field, matrix gaussian')
-parser.add_argument('--fc_bayes', type=str, default=None)
-parser.add_argument('--log_sigma_init_range', type=float, nargs='+', default=[-6, -5])
-parser.add_argument('--log_sigma_lr', type=float, default=0.1)
-parser.add_argument('--single_eps', action='store_true', default=False)
-parser.add_argument('--local_reparam', action='store_true', default=False)
+parser.add_argument('--psi_init_range', type=float, nargs='+', default=[-6, -5])
+parser.add_argument('--pert_init_std', type=float, default=0.2)
+parser.add_argument('--lr', type=float, default=0.1)
+parser.add_argument('--lr_min', type=float, default=None)
+parser.add_argument('--num_mc_samples', type=int, default=20)
+parser.add_argument('--low_rank', type=int, default=1)
 parser.add_argument('--alpha', type=float, default=1.)
 parser.add_argument('--max_choice', type=int, default=None)
 parser.add_argument('--num_gan', type=int, default=100)
 parser.add_argument('--aug_n', type=int, default=None)
 parser.add_argument('--aug_m', type=int, default=None)
 parser.add_argument('--mi_th', type=float, default=0.5)
+parser.add_argument('--cos_lr', action='store_true', default=False)
+# for the old version mean_field
+# parser.add_argument('--single_eps', action='store_true', default=False)
+# parser.add_argument('--local_reparam', action='store_true', default=False)
 
 # GAN generated data augmentation
 parser.add_argument('--blur_prob', type=float, default=0.5)
@@ -83,6 +93,10 @@ parser.add_argument('--step-size', default=1./255., type=float,
 parser.add_argument('--random',
                     default=True,
                     help='random initialization for PGD')
+
+# Speedup
+parser.add_argument('--amp', action='store_true', default=False,
+                    help='use Native AMP for mixed precision training')
 
 # Dist
 parser.add_argument('--world-size', default=1, type=int,
@@ -107,7 +121,6 @@ best_acc = 0
 
 def main():
     args = parser.parse_args()
-    if not os.path.isdir(args.data_path): os.makedirs(args.data_path)
     job_id = args.job_id
     args.save_path = args.save_path + job_id
     if not os.path.isdir(args.save_path): os.makedirs(args.save_path)
@@ -145,6 +158,17 @@ def main_worker(gpu, ngpus_per_node, args):
     log = (log, args.gpu)
 
     net = models.__dict__[args.arch](args, num_classes=10341)
+    net.load_state_dict({k.replace('module.', ''): v for k, v in
+        torch.load('./ckpts/mobilenet_v2-face-ft0.01-drop0-decay5.pth', map_location='cpu')['state_dict'].items()})
+
+    if args.bayes == 'mf':
+        net = to_bayesian_mf(net, args.psi_init_range, args.num_mc_samples)
+    elif args.bayes == 'low_rank':
+        net = to_bayesian_lr(net, args.low_rank, args.num_mc_samples, args.pert_init_std)
+    else:
+        assert args.bayes is None
+        args.num_mc_samples = 1
+
     print_log("Python version : {}".format(sys.version.replace('\n', ' ')), log)
     print_log("PyTorch  version : {}".format(torch.__version__), log)
     print_log("CuDNN  version : {}".format(torch.backends.cudnn.version()), log)
@@ -166,31 +190,27 @@ def main_worker(gpu, ngpus_per_node, args):
 
     criterion = torch.nn.CrossEntropyLoss().cuda(args.gpu)
 
-    mus, vars = [], []
+    pre_trained, new_added = [], []
     for name, param in net.named_parameters():
-        if 'log_sigma' in name: vars.append(param)
-        else: assert(param.requires_grad); mus.append(param)
-    optimizer = torch.optim.SGD(mus, args.learning_rate,
-                                momentum=args.momentum,
-                                weight_decay=args.decay)
-    if args.bayes:
-        if args.fc_bayes:
-            assert(len(mus) == len(vars))
+        if (args.bayes == 'mf' and 'psi' in name) \
+                or (args.bayes == 'low_rank' and ('perturbations' in name)):
+            new_added.append(param)
         else:
-            pass
-            # print(len(mus), len(vars))
-        var_optimizer = VarSGD(vars, args.log_sigma_lr, num_data=None,
-                               momentum=args.momentum, weight_decay=args.decay)
+            pre_trained.append(param)
+    args.lr_min = args.ft_lr
+    optimizer = torch.optim.SGD([{'params': pre_trained, 'lr': args.ft_lr},
+                                 {'params': new_added, 'lr': args.lr}],
+                                 weight_decay=0, momentum=args.momentum)
+    prior_regularizor = PriorRegularizor(net, args.decay, 450233,
+                                         args.num_mc_samples, args.bayes)
+    if args.amp:
+        amp_autocast = torch.cuda.amp.autocast
+        loss_scaler = torch.cuda.amp.GradScaler()
+        print_log('Using native Torch AMP. Training in mixed precision.', log)
     else:
-        assert(len(vars) == 0)
-        var_optimizer = NoneOptimizer()
-
-    net_dict = net.state_dict()
-    if args.fc_bayes:
-        net_dict.update({k + '_mu'if args.bayes and ('weight' in k or 'bias' in k) else k: v for k,v in torch.load('./ckpts/mobilenet_v2-face-ft0.01-drop0-decay5.pth', map_location='cuda:{}'.format(args.gpu))['state_dict'].items()})
-    else:
-        net_dict.update({k + '_mu'if (args.bayes and ('weight' in k or 'bias' in k) and 'classifier' not in k) else k: v for k,v in torch.load('./ckpts/mobilenet_v2-face-ft0.01-drop0-decay5.pth', map_location='cuda:{}'.format(args.gpu))['state_dict'].items()})
-    net.load_state_dict(net_dict)
+        amp_autocast = suppress  # do nothing
+        loss_scaler = None
+        print_log('AMP not enabled. Training in float32.', log)
 
     recorder = RecorderMeter(args.epochs)
     if args.resume:
@@ -205,9 +225,11 @@ def main_worker(gpu, ngpus_per_node, args):
             net.load_state_dict(checkpoint['state_dict'] if args.distributed else {k.replace('module.', ''): v for k,v in checkpoint['state_dict'].items()})
             if not args.evaluate:
                 optimizer.load_state_dict(checkpoint['optimizer'])
-                var_optimizer.load_state_dict(checkpoint['var_optimizer'])
+            if args.amp:
+                loss_scaler.load_state_dict(checkpoint['loss_scaler'])
             best_acc = recorder.max_accuracy(False)
-            print_log("=> loaded checkpoint '{}' accuracy={} (epoch {})" .format(args.resume, best_acc, checkpoint['epoch']), log)
+            print_log("=> loaded checkpoint '{}' accuracy={} (epoch {})" .format(
+                args.resume, best_acc, checkpoint['epoch']), log)
         else:
             print_log("=> no checkpoint found at '{}'".format(args.resume), log)
     else:
@@ -216,22 +238,23 @@ def main_worker(gpu, ngpus_per_node, args):
     cudnn.benchmark = True
 
     train_loader, train_loader1, test_loaders, fake_loader = load_dataset_face_ft(args)
-    var_optimizer.num_data = len(train_loader.dataset)
 
     if args.evaluate:
         while True:
-            evaluate(test_loaders, fake_loader, net, criterion, args, log, 20, 20)
+            evaluate(test_loaders, fake_loader, net, criterion, args, log, args.num_mc_samples, amp_autocast=amp_autocast)
         return
 
     start_time = time.time()
     epoch_time = AverageMeter()
     train_los = -1
+    cur_lr, cur_slr = args.ft_lr, args.lr
 
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_loader.sampler.set_epoch(epoch)
             train_loader1.sampler.set_epoch(epoch)
-        cur_lr, cur_slr = adjust_learning_rate(optimizer, var_optimizer, epoch, args)
+        if not args.cos_lr:
+            cur_lr, cur_slr = adjust_learning_rate(optimizer, epoch, args)
 
         need_hour, need_mins, need_secs = convert_secs2time(epoch_time.avg * (args.epochs-epoch))
         need_time = '[Need: {:02d}:{:02d}:{:02d}]'.format(need_hour, need_mins, need_secs)
@@ -240,9 +263,12 @@ def main_worker(gpu, ngpus_per_node, args):
                                     time_string(), epoch, args.epochs, need_time, cur_lr, cur_slr) \
                     + ' [Best : Accuracy={:.2f}, Error={:.2f}]'.format(recorder.max_accuracy(False), 100-recorder.max_accuracy(False)), log)
 
-        train_acc, train_los = train(train_loader, train_loader1, net, criterion, optimizer, var_optimizer, epoch, args, log)
-        # if epoch == 0:#args.epochs//2 - 1:
-        evaluate(test_loaders, fake_loader, net, criterion, args, log, 2)
+        train_acc, train_los, cur_lr, cur_slr = train(train_loader, train_loader1,
+            net, criterion, optimizer, epoch, args, log,
+            prior_regularizor=prior_regularizor,
+            amp_autocast=amp_autocast,
+            loss_scaler=loss_scaler)
+
         recorder.update(epoch, train_los, train_acc, 0, 0)
 
         if args.gpu == 0:
@@ -252,7 +278,7 @@ def main_worker(gpu, ngpus_per_node, args):
               'state_dict': net.state_dict(),
               'recorder': recorder,
               'optimizer' : optimizer.state_dict(),
-              'var_optimizer' : var_optimizer.state_dict(),
+              'loss_scaler' : loss_scaler.state_dict() if args.amp else None,
             }, False, args.save_path, 'checkpoint.pth.tar')
 
         epoch_time.update(time.time() - start_time)
@@ -260,92 +286,166 @@ def main_worker(gpu, ngpus_per_node, args):
         recorder.plot_curve(os.path.join(args.save_path, 'log.png'))
 
     while True:
-        evaluate(test_loaders, fake_loader, net, criterion, args, log, 20, 20)
+        evaluate(test_loaders, fake_loader, net, criterion, args, log, args.num_mc_samples, amp_autocast=amp_autocast)
 
     log[0].close()
 
-def train(train_loader, train_loader1, model, criterion, optimizer, var_optimizer, epoch, args, log):
-    batch_time = AverageMeter()
-    data_time = AverageMeter()
-    losses = AverageMeter()
-    rk_losses = AverageMeter()
-    top1 = AverageMeter()
-    top5 = AverageMeter()
+def train(train_loader, train_loader1, model, criterion, optimizer, epoch, args,
+          log, prior_regularizor, amp_autocast=suppress, loss_scaler=None):
+    cur_lr, cur_slr = None, None
+    if args.alpha > 0:
+        batch_time = AverageMeter()
+        data_time = AverageMeter()
+        losses = AverageMeter()
+        unc_losses = AverageMeter()
+        top1 = AverageMeter()
+        top5 = AverageMeter()
 
-    train_loader1_iter = iter(train_loader1)
+        train_loader1_iter = iter(train_loader1)
 
-    model.train()
+        model.train()
 
-    end = time.time()
-    for i, (input, target) in enumerate(train_loader):
-        data_time.update(time.time() - end)
-
-        input = input.cuda(args.gpu, non_blocking=True)
-        target = target.cuda(args.gpu, non_blocking=True)
-
-
-        input1 = next(train_loader1_iter)
-        input1 = input1.cuda(args.gpu, non_blocking=True)
-
-        bs = input.shape[0]
-        bs1 = input1.shape[0]
-
-        output = model(torch.cat([input, input1.repeat(2, 1, 1, 1)]))
-        loss = criterion(output[:bs], target)
-
-        out1_0 = output[bs:bs+bs1].softmax(-1)
-        out1_1 = output[bs+bs1:].softmax(-1)
-        mi1 = ent((out1_0 + out1_1)/2.) - (ent(out1_0) + ent(out1_1))/2.
-        rank_loss = torch.nn.functional.relu(args.mi_th - mi1).mean() #rank_loss = torch.nn.functional.softplus(mi - mi1).mean()
-
-        prec1, prec5 = accuracy(output[:bs], target, topk=(1, 5))
-        losses.update(loss.detach().item(), bs)
-        rk_losses.update(rank_loss.detach().item(), bs1)
-        top1.update(prec1.item(), bs)
-        top5.update(prec5.item(), bs)
-
-        optimizer.zero_grad()
-        var_optimizer.zero_grad()
-        (loss+rank_loss*args.alpha).backward()
-        optimizer.step()
-        var_optimizer.step()
-
-        batch_time.update(time.time() - end)
         end = time.time()
+        for i, (input, target) in enumerate(train_loader):
+            data_time.update(time.time() - end)
 
-        if i == len(train_loader) - 1:
-            print_log('  Epoch: [{:03d}][{:03d}/{:03d}]   '
-                        'Time {batch_time.avg:.3f}   '
-                        'Data {data_time.avg:.3f}   '
-                        'Loss {loss.avg:.4f}   '
-                        'RK Loss {rk_loss.avg:.4f}   '
-                        'Prec@1 {top1.avg:.3f}   '
-                        'Prec@5 {top5.avg:.3f}   '.format(
-                        epoch, i, len(train_loader), batch_time=batch_time, rk_loss=rk_losses,
-                        data_time=data_time, loss=losses, top1=top1, top5=top5) + time_string(), log)
-    return top1.avg, losses.avg
+            if args.cos_lr:
+                cur_lr, cur_slr = adjust_learning_rate_per_step(
+                    optimizer, epoch, i, len(train_loader), args)
 
-def evaluate(test_loaders, fake_loader, net, criterion, args, log, nums=100, nums2=None):
+            input = input.cuda(args.gpu, non_blocking=True)
+            target = target.cuda(args.gpu, non_blocking=True)
+
+            input1 = next(train_loader1_iter)
+            input1 = input1.cuda(args.gpu, non_blocking=True)
+
+            bs = input.shape[0]
+            bs1 = input1.shape[0]
+
+            if args.bayes == 'low_rank':
+                mc_sample_id = np.concatenate([np.random.randint(0, args.num_mc_samples, size=bs),
+                    np.stack([np.random.choice(args.num_mc_samples, 2, replace=False) for _ in range(bs1)]).T.reshape(-1)])
+                set_mc_sample_id(model, args.num_mc_samples, mc_sample_id)
+
+            with amp_autocast():
+                output = model(torch.cat([input, input1.repeat(2, 1, 1, 1)]))
+                loss = criterion(output[:bs], target)
+
+                out1_0 = output[bs:bs+bs1].softmax(-1)
+                out1_1 = output[bs+bs1:].softmax(-1)
+                mi1 = ent((out1_0 + out1_1)/2.) - (ent(out1_0) + ent(out1_1))/2.
+                unc_loss = torch.nn.functional.relu(args.mi_th - mi1).mean()
+
+            prec1, prec5 = accuracy(output[:bs], target, topk=(1, 5))
+            losses.update(loss.detach().item(), bs)
+            unc_losses.update(unc_loss.detach().item(), bs1)
+            top1.update(prec1.item(), bs)
+            top5.update(prec5.item(), bs)
+
+            optimizer.zero_grad()
+            if loss_scaler is not None:
+                loss_scaler.scale(loss+unc_loss*args.alpha).backward()
+                loss_scaler.unscale_(optimizer)
+                prior_regularizor.step()
+                loss_scaler.step(optimizer)
+                loss_scaler.update()
+            else:
+                (loss+unc_loss*args.alpha).backward()
+                prior_regularizor.step()
+                optimizer.step()
+
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            if i == len(train_loader) - 1:
+                print_log('  Epoch: [{:03d}][{:03d}/{:03d}]   '
+                            'Time {batch_time.avg:.3f}   '
+                            'Data {data_time.avg:.3f}   '
+                            'Loss {loss.avg:.4f}   '
+                            'Unc Loss {unc_loss.avg:.4f}   '
+                            'Prec@1 {top1.avg:.3f}   '
+                            'Prec@5 {top5.avg:.3f}   '.format(
+                            epoch, i, len(train_loader), batch_time=batch_time, unc_loss=unc_losses,
+                            data_time=data_time, loss=losses, top1=top1, top5=top5) + time_string(), log)
+    else:
+        batch_time = AverageMeter()
+        data_time = AverageMeter()
+        losses = AverageMeter()
+        top1 = AverageMeter()
+        top5 = AverageMeter()
+
+        model.train()
+
+        end = time.time()
+        for i, (input, target) in enumerate(train_loader):
+            data_time.update(time.time() - end)
+
+            if args.cos_lr:
+                cur_lr, cur_slr = adjust_learning_rate_per_step(
+                    optimizer, epoch, i, len(train_loader), args)
+
+            input = input.cuda(args.gpu, non_blocking=True)
+            target = target.cuda(args.gpu, non_blocking=True)
+            if args.bayes == 'low_rank':
+                mc_sample_id = np.random.randint(0, args.num_mc_samples, size=len(input))
+                set_mc_sample_id(model, args.num_mc_samples, mc_sample_id)
+
+            with amp_autocast():
+                output = model(input)
+                loss = criterion(output, target)
+
+            prec1, prec5 = accuracy(output, target, topk=(1, 5))
+            losses.update(loss.detach().item(), input.size(0))
+            top1.update(prec1.item(), input.size(0))
+            top5.update(prec5.item(), input.size(0))
+
+            optimizer.zero_grad()
+            if loss_scaler is not None:
+                loss_scaler.scale(loss).backward()
+                loss_scaler.unscale_(optimizer)
+                prior_regularizor.step()
+                loss_scaler.step(optimizer)
+                loss_scaler.update()
+            else:
+                loss.backward()
+                prior_regularizor.step()
+                optimizer.step()
+
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            if i == len(train_loader) - 1:
+                print_log('  Epoch: [{:03d}][{:03d}/{:03d}]   '
+                            'Time {batch_time.avg:.3f}   '
+                            'Data {data_time.avg:.3f}   '
+                            'Loss {loss.avg:.4f}   '
+                            'Prec@1 {top1.avg:.3f}   '
+                            'Prec@5 {top5.avg:.3f}   '.format(
+                            epoch, i, len(train_loader), batch_time=batch_time,
+                            data_time=data_time, loss=losses, top1=top1, top5=top5) + time_string(), log)
+    return top1.avg, losses.avg, cur_lr, cur_slr
+
+def evaluate(test_loaders, fake_loader, net, criterion, args, log, nums, amp_autocast=suppress):
     if args.bayes: net.apply(freeze)
     if args.gpu == 0: print("---------------------------deterministic---------------------------")
-    ens_validate(test_loaders, net, criterion, args, log, False, 1)
+    ens_validate(test_loaders, net, criterion, args, log, False, 1, amp_autocast=amp_autocast)
     if args.bayes: net.apply(unfreeze)
-    if not args.bayes and args.dropout_rate == 0: nums = 1; nums2=1
-    if not nums2: nums2 = nums
+    if not args.bayes and args.dropout_rate == 0: nums = 1
 
-    if args.gpu == 0: print("---------------------------ensemble {} times---------------------------".format(nums2))
-    ens_validate(test_loaders, net, criterion, args, log, True, nums2)
+    if args.gpu == 0: print("---------------------------ensemble {} times---------------------------".format(nums))
+    ens_validate(test_loaders, net, criterion, args, log, True, nums, amp_autocast=amp_autocast)
 
-    ens_attack(test_loaders, net, criterion, args, log, nums, min(nums, 8))
+    ens_attack(test_loaders, net, criterion, args, log, nums, amp_autocast=amp_autocast)
     if args.gpu == 0:
         for k in test_loaders:
             print_log('{} vs. adversarial: AP {}'.format(k[0], plot_mi(args.save_path, 'adv_'+k[0], k[0])), log)
-    ens_validate(fake_loader, net, criterion, args, log, True, nums, suffix='fake')
+    ens_validate(fake_loader, net, criterion, args, log, True, nums, suffix='fake', amp_autocast=amp_autocast)
     if args.gpu == 0:
         for k in test_loaders:
             print_log('{} vs. DeepFake: AP {}'.format(k[0], plot_mi(args.save_path, 'fake', k[0])), log)
 
-def ens_validate(val_loaders, model, criterion, args, log, unfreeze_dropout=False, num_ens=100, suffix=''):
+def ens_validate(val_loaders, model, criterion, args, log, unfreeze_dropout=False,
+                 num_ens=100, suffix='', amp_autocast=suppress):
     model.eval()
     if unfreeze_dropout and args.dropout_rate > 0.:
         for m in model.modules():
@@ -364,12 +464,15 @@ def ens_validate(val_loaders, model, criterion, args, log, unfreeze_dropout=Fals
                 if isinstance(input, tuple) or isinstance(input, list): input = input[0]
                 input = input.cuda(args.gpu, non_blocking=True)
 
-                embedding_b = 0
-                for ens in range(num_ens):
-                    output, output_logits = model(input, return_both=True)
-                    embedding_b += output/num_ens
-                    mis[i] = (mis[i] * ens + (-output_logits.softmax(-1) * output_logits.log_softmax(-1)).sum(1)) / (ens + 1)
-                    preds[i] = (preds[i] * ens + output_logits.softmax(-1)) / (ens + 1)
+                with amp_autocast():
+                    embedding_b = 0
+                    for ens in range(num_ens):
+                        if args.bayes == 'low_rank':
+                            set_mc_sample_id(model, args.num_mc_samples, ens)
+                        output, output_logits = model(input, return_both=True)
+                        embedding_b += output/num_ens
+                        mis[i] = (mis[i] * ens + (-output_logits.softmax(-1) * output_logits.log_softmax(-1)).sum(1)) / (ens + 1)
+                        preds[i] = (preds[i] * ens + output_logits.softmax(-1)) / (ens + 1)
 
                 norm = torch.norm(embedding_b, 2, 1, True)
                 embedding = torch.div(embedding_b, norm)
@@ -385,11 +488,14 @@ def ens_validate(val_loaders, model, criterion, args, log, unfreeze_dropout=Fals
         print_log('  **Test** {}: {:.3f}'.format(name, accuracy.mean()), log, True)
     torch.distributed.barrier()
 
-def ens_attack(val_loaders, model, criterion, args, log, num_ens=20, num_ens_a=8):
+def ens_attack(val_loaders, model, criterion, args, log, num_ens=20, amp_autocast=suppress):
     def _grad(X, y, mean, std):
         with model.no_sync():
             with torch.enable_grad():
                 X.requires_grad_()
+                if args.bayes == 'low_rank':
+                    sample_id = np.tile(np.arange(num_ens_a)[:, None], (1, X.size(0))).reshape(-1)
+                    set_mc_sample_id(model,num_ens_a, sample_id)
                 output = model(X.sub(mean).div(std).repeat(num_ens_a, 1, 1, 1), True)
                 output = output.reshape(num_ens_a, X.size(0)//2, 2, output.size(-1))
                 loss = ((output[:, :, 0, :].mean(0) - y[:, 1, :].detach())**2).sum(1) + ((output[:, :, 1, :].mean(0) - y[:, 0, :].detach())**2).sum(1)
@@ -414,19 +520,23 @@ def ens_attack(val_loaders, model, criterion, args, log, num_ens=20, num_ens_a=8
         mis = 0
         preds = 0
         embedding_b = 0
-        for ens in range(num_ens):
-            output, output_logits = model(X_pgd.sub(mean).div(std), return_both=True)
-            embedding_b += output/num_ens
-            mis = (mis * ens + (-output_logits.softmax(-1) * (output_logits).log_softmax(-1)).sum(1)) / (ens + 1)
-            preds = (preds * ens + output_logits.softmax(-1)) / (ens + 1)
+        with amp_autocast():
+            for ens in range(num_ens):
+                if args.bayes == 'low_rank':
+                    set_mc_sample_id(model, args.num_mc_samples, ens)
+                output, output_logits = model(X_pgd.sub(mean).div(std), return_both=True)
+                embedding_b += output/num_ens
+                mis = (mis * ens + (-output_logits.softmax(-1) * (output_logits).log_softmax(-1)).sum(1)) / (ens + 1)
+                preds = (preds * ens + output_logits.softmax(-1)) / (ens + 1)
 
-        norm = torch.norm(embedding_b, 2, 1, True)
-        embedding = torch.div(embedding_b, norm)
-        mis = (- preds * (preds+1e-8).log()).sum(1) - (0 if num_ens == 1 else mis)
+            norm = torch.norm(embedding_b, 2, 1, True)
+            embedding = torch.div(embedding_b, norm)
+            mis = (- preds * (preds+1e-8).log()).sum(1) - (0 if num_ens == 1 else mis)
         return embedding, mis
 
     mean = torch.from_numpy(np.array([0.5, 0.5, 0.5])).view(1,3,1,1).cuda(args.gpu).float()
     std = torch.from_numpy(np.array([0.5, 0.5, 0.5])).view(1,3,1,1).cuda(args.gpu).float()
+    num_ens_a = min(8, num_ens)
 
     model.eval()
     if args.dropout_rate > 0.:
@@ -438,11 +548,11 @@ def ens_attack(val_loaders, model, criterion, args, log, num_ens=20, num_ens_a=8
             mis = []
             embeddings = []
             for i, input in enumerate(val_loader):
-                is_pair = issame[i*args.batch_size//2:min(len(issame), i*args.batch_size//2+args.batch_size//2)]
+                is_pair = issame[i*args.batch_size//4:min(len(issame), i*args.batch_size//4+args.batch_size//4)]
                 if np.all(is_pair == False): continue
 
                 input = input.cuda(args.gpu, non_blocking=True).mul_(std).add_(mean)
-                input = input.reshape(args.batch_size//2, 2, 3, 112, 112)
+                input = input.reshape(args.batch_size//4, 2, 3, 112, 112)
                 assert len(is_pair) == input.shape[0], (len(is_pair), input.shape[0])
 
                 mask = torch.from_numpy(is_pair).cuda(args.gpu, non_blocking=True) == True
@@ -473,17 +583,18 @@ def save_checkpoint(state, is_best, save_path, filename):
         bestname = os.path.join(save_path, 'model_best.pth.tar')
         shutil.copyfile(filename, bestname)
 
-def adjust_learning_rate(optimizer, var_optimizer, epoch, args):
-    lr = args.learning_rate
-    slr = args.log_sigma_lr
-    assert len(args.gammas) == len(args.schedule), "length of gammas and schedule should be equal"
-    for (gamma, step) in zip(args.gammas, args.schedule):
-        if (epoch >= step): slr = slr * gamma
-        else: break
-    lr = lr * np.prod(args.gammas)
-    for param_group in optimizer.param_groups: param_group['lr'] = lr
-    for param_group in var_optimizer.param_groups: param_group['lr'] = slr
-    return lr, slr
+def adjust_learning_rate_per_step(optimizer, epoch, i, num_ites_per_epoch, args):
+    optimizer.param_groups[0]['lr'] = args.ft_lr# * (1 + math.cos(math.pi * (epoch + float(i)/num_ites_per_epoch) / args.epochs)) / 2.
+    optimizer.param_groups[1]['lr'] = args.lr_min + (args.lr-args.lr_min) * (1 + math.cos(math.pi * (epoch + float(i)/num_ites_per_epoch) / args.epochs)) / 2.
+    return optimizer.param_groups[0]['lr'], optimizer.param_groups[1]['lr']
+
+def adjust_learning_rate(optimizer, epoch, args):
+    if epoch in args.schedule:
+        scale = args.gammas[args.schedule.index(epoch)]
+        for param_group in optimizer.param_groups:
+            param_group['lr'] *= scale
+            param_group['lr'] = max(param_group['lr'], args.lr_min)
+    return tuple([param_group['lr'] for param_group in optimizer.param_groups])
 
 def accuracy(output, target, topk=(1,)):
     if len(target.shape) > 1: return torch.tensor(1), torch.tensor(1)
@@ -493,7 +604,7 @@ def accuracy(output, target, topk=(1,)):
         batch_size = target.size(0)
 
         _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
+        pred = pred.t().contiguous()
         correct = pred.eq(target.view(1, -1).expand_as(pred))
 
         res = []
@@ -520,13 +631,5 @@ def dist_collect(x):
                 for _ in range(dist.get_world_size())]
     dist.all_gather(out_list, x)
     return torch.cat(out_list, dim=0)
-
-def freeze(m):
-    if isinstance(m, (BayesConv2dMF, BayesLinearMF, BayesBatchNorm2dMF)):
-        m.deterministic = True
-
-def unfreeze(m):
-    if isinstance(m, (BayesConv2dMF, BayesLinearMF, BayesBatchNorm2dMF)):
-        m.deterministic = False
 
 if __name__ == '__main__': main()
