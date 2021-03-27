@@ -21,7 +21,7 @@ from utils import AverageMeter, RecorderMeter, time_string, convert_secs2time, \
 sys.path.insert(0, '/data/zhijie/ScalableBDL/')
 from scalablebdl.low_rank import to_bayesian as to_bayesian_lr
 from scalablebdl.mean_field import to_bayesian as to_bayesian_mf
-from scalablebdl.bnn_utils import freeze, unfreeze, set_mc_sample_id
+from scalablebdl.bnn_utils import freeze, unfreeze, set_mc_sample_id, use_single_eps, use_local_reparam, use_flipout
 from scalablebdl.prior_reg import PriorRegularizor
 
 parser = argparse.ArgumentParser(description='Bayesian fine-tuning script',
@@ -78,6 +78,10 @@ parser.add_argument('--aug_n', type=int, default=None)
 parser.add_argument('--aug_m', type=int, default=None)
 parser.add_argument('--mi_th', type=float, default=0.5)
 parser.add_argument('--cos_lr', action='store_true', default=False)
+parser.add_argument('--MOPED', action='store_true', default=False)
+parser.add_argument('--single_eps', action='store_true', default=False)
+parser.add_argument('--local_reparam', action='store_true', default=False)
+parser.add_argument('--flipout', action='store_true', default=False)
 # for the old version mean_field
 # parser.add_argument('--single_eps', action='store_true', default=False)
 # parser.add_argument('--local_reparam', action='store_true', default=False)
@@ -181,6 +185,9 @@ def main_worker(gpu, ngpus_per_node, args):
                    str(args.manualSeed), '_eval' if args.evaluate else '')), 'w')
     log = (log, args.gpu)
 
+    log1 = open(os.path.join(args.save_path, 'cost.txt'), 'w')
+    log1 = (log1, args.gpu)
+
     if args.dataset == 'cifar10' or args.dataset == 'cifar100':
         net = cifar_models.__dict__[args.arch](args, args.depth, args.wide, args.num_classes)
 
@@ -203,6 +210,13 @@ def main_worker(gpu, ngpus_per_node, args):
     else:
         assert args.bayes is None
         args.num_mc_samples = 1
+
+    if args.single_eps:
+        use_single_eps(net)
+    if args.local_reparam:
+        use_local_reparam(net)
+    if args.flipout:
+        use_flipout(net)
 
     print_log("Python version : {}".format(sys.version.replace('\n', ' ')), log)
     print_log("PyTorch  version : {}".format(torch.__version__), log)
@@ -240,7 +254,7 @@ def main_worker(gpu, ngpus_per_node, args):
                                  weight_decay=0, momentum=args.momentum,
                                  nesterov=((args.momentum > 0.0) and ('cifar' in args.dataset)))
     prior_regularizor = PriorRegularizor(net, args.decay, args.num_data,
-                                         args.num_mc_samples, args.bayes)
+                                         args.num_mc_samples, args.bayes, args.MOPED)
     if args.amp:
         amp_autocast = torch.cuda.amp.autocast
         loss_scaler = torch.cuda.amp.GradScaler()
@@ -284,6 +298,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 criterion, args, log, args.num_mc_samples, amp_autocast=amp_autocast)
         return
 
+    init_time = time.time()
     start_time = time.time()
     epoch_time = AverageMeter()
     train_los = -1
@@ -304,7 +319,7 @@ def main_worker(gpu, ngpus_per_node, args):
                     + ' [Best : Accuracy={:.2f}, Error={:.2f}]'.format(recorder.max_accuracy(False), 100-recorder.max_accuracy(False)), log)
 
         train_acc, train_los, cur_lr, cur_slr = train(train_loader, train_loader1,
-            net, criterion, optimizer, epoch, args, log,
+            net, criterion, optimizer, epoch, args, log, log1, init_time,
             prior_regularizor=prior_regularizor,
             amp_autocast=amp_autocast,
             loss_scaler=loss_scaler)
@@ -337,13 +352,14 @@ def main_worker(gpu, ngpus_per_node, args):
         start_time = time.time()
         recorder.plot_curve(os.path.join(args.save_path, 'log.png'))
 
-    while True:
-        evaluate(test_loader, test_loader1, fake_loader, extra_ood_loader, net,
-            criterion, args, log, args.num_mc_samples, amp_autocast=amp_autocast)
+    # while True:
+    evaluate(test_loader, test_loader1, fake_loader, extra_ood_loader, net,
+        criterion, args, log, args.num_mc_samples, amp_autocast=amp_autocast)
     log[0].close()
+    log1[0].close()
 
 def train(train_loader, train_loader1, model, criterion,
-          optimizer, epoch, args, log, prior_regularizor,
+          optimizer, epoch, args, log, log1, init_time, prior_regularizor,
           amp_autocast=suppress, loss_scaler=None):
     cur_lr, cur_slr = None, None
     if args.alpha > 0:
@@ -468,6 +484,12 @@ def train(train_loader, train_loader1, model, criterion,
 
             batch_time.update(time.time() - end)
             end = time.time()
+
+            if i % 20 == 0:
+                print_log('{:2f} {:.4f} {:.2f} {:.2f} {:.2f} {:.2f}'.format(time.time() - init_time, losses.avg, torch.cuda.memory_allocated() / 1024 / 1024,
+                torch.cuda.max_memory_allocated() / 1024 / 1024,
+                torch.cuda.memory_cached() / 1024 / 1024,
+                torch.cuda.max_memory_cached() / 1024 / 1024), log1)
 
             if i == len(train_loader) - 1:
                 print_log('  Epoch: [{:03d}][{:03d}/{:03d}]   '
